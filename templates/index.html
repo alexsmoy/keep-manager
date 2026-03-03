@@ -1,16 +1,82 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Google Keep Manager</title>
+    <!-- Use Inter font for a clean, modern look -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
+
 <body>
-    <div id="app">
-        <h1>Google Keep Manager</h1>
-        <p>Loading application...</p>
+    <div class="container">
+
+        <!-- Sticky Header Area -->
+        <div class="header-area">
+            <div class="header">
+                <h1>Keep Manager</h1>
+                <div id="status" class="status-indicator status-loading">Initializing...</div>
+            </div>
+
+            <div class="controls-panel">
+                <div class="input-group">
+                    <label for="search-input">Standard Search</label>
+                    <input type="text" id="search-input" placeholder="Search title or body...">
+                </div>
+                <div class="input-group">
+                    <label for="regex-input">Regex Filter</label>
+                    <input type="text" id="regex-input" placeholder="e.g. \byoutube\.com\b">
+                </div>
+                <div class="input-group" style="justify-content: flex-end; flex: 0.5;">
+                    <button id="search-btn" style="height: 100%;">Filter</button>
+                </div>
+            </div>
+
+            <div id="action-bar" class="action-bar" style="display: none;">
+                <div>
+                    <strong id="selected-count">0</strong> notes selected
+                </div>
+                <div>
+                    <button id="mass-delete-btn" class="danger">Mass Delete</button>
+                    <button id="clear-selection-btn"
+                        style="background: transparent; border: 1px solid var(--border-color); margin-left:10px;">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Split Content -->
+        <div class="main-content">
+            <!-- Left Pane: Table -->
+            <div class="table-area">
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="checkbox-col">
+                                    <input type="checkbox" id="select-all" title="Select All">
+                                </th>
+                                <th style="width: 35%">Title</th>
+                                <th>Preview</th>
+                            </tr>
+                        </thead>
+                        <tbody id="notes-table-body">
+                            <!-- Rows will be populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right Pane: Note Preview -->
+            <div class="preview-area" id="preview-area">
+                <div class="preview-empty">Select a note to view its contents (Read-Only)</div>
+            </div>
+        </div>
+
     </div>
+
     <script src="/static/app.js"></script>
 </body>
+
 </html>

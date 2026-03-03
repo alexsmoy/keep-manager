@@ -20,7 +20,8 @@ def init_db():
                 create_time TEXT,
                 update_time TEXT,
                 trashed BOOLEAN,
-                archived BOOLEAN
+                archived BOOLEAN,
+                has_attachments BOOLEAN DEFAULT 0
             )
         ''')
         # Labels table
