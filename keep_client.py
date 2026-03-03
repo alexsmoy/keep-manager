@@ -1,6 +1,10 @@
 import os
+from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+
+# Load environment variables from .env file
+load_dotenv()
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/keep', 'https://www.googleapis.com/auth/keep.readonly']

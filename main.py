@@ -1,5 +1,6 @@
 import os
 import re
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -9,6 +10,9 @@ from typing import List, Optional
 from db import get_db
 from keep_client import get_keep_service
 from sync import sync_notes
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = FastAPI(title="Google Keep Manager")
 

@@ -1,5 +1,10 @@
+import os
+from dotenv import load_dotenv
 from keep_client import get_keep_service
 from db import get_db
+
+# Load environment variables from .env file
+load_dotenv()
 
 def sync_notes(user_email=None):
     print("Starting sync process...")
