@@ -85,13 +85,14 @@ async def mass_delete(req: DeleteRequest, background_tasks: BackgroundTasks):
     conn = get_db()
     success_ids = []
     
-    # Ideally should use Batch APIs, but looping for simplicity since Google Keep API v1 Delete is actually relatively fast
+    # NOTE: Google Keep API notes.delete() is a PERMANENT deletion, not a "move to trash".
+    # There is no undo. See ai-docs/google-keep-api.md and ai-docs/known-issues.md (ISSUE-001).
     for note_id in req.note_ids:
         try:
-            # Delete via Google Keep API
+            # Permanently delete via Google Keep API (irreversible)
             service.notes().delete(name=note_id).execute()
             
-            # Immediately mark as trashed locally so UI feels instantly updated
+            # Mark as trashed locally to hide from UI pending next sync
             with conn:
                 conn.execute("UPDATE notes SET trashed = 1 WHERE id = ?", (note_id,))
             

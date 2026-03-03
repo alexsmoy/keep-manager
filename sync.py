@@ -15,7 +15,8 @@ def sync_notes(user_email=None):
         total_synced = 0
         
         while True:
-            # Note: filter constraints can be applied here. We pull all for local caching.
+            # NOTE: When no filter is supplied, the API applies 'trashed = false' by default.
+            # This means we only sync non-trashed notes. See ai-docs/known-issues.md (ISSUE-003).
             request = service.notes().list(pageSize=100, pageToken=next_page_token)
             response = request.execute()
             
@@ -29,7 +30,7 @@ def sync_notes(user_email=None):
                 trashed_db = 1 if trashed else 0
                 has_attachments = 1 if 'attachments' in note and len(note['attachments']) > 0 else 0
                 
-                # Parse the note body
+                # Parse the note body — Section is a union: either 'text' (TextContent) or 'list' (ListContent)
                 body_content = ""
                 snippet = ""
                 if 'body' in note:
@@ -43,6 +44,13 @@ def sync_notes(user_email=None):
                             checked = item.get('checked', False)
                             mark = "[x]" if checked else "[ ]"
                             items.append(f"{mark} {text}")
+                            # Parse nested child list items (API supports 1 level of nesting)
+                            # See ai-docs/known-issues.md (ISSUE-004)
+                            for child in item.get('childListItems', []):
+                                child_text = child.get('text', {}).get('text', '')
+                                child_checked = child.get('checked', False)
+                                child_mark = "[x]" if child_checked else "[ ]"
+                                items.append(f"  {child_mark} {child_text}")
                         body_content = "\n".join(items)
                 
                 snippet = body_content[:150] + "..." if len(body_content) > 150 else body_content

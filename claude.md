@@ -37,13 +37,15 @@ Keep Manager/
 ├── claude.md            # THIS FILE — AI agent primary context
 ├── agents.md            # Agent entry point — points here
 ├── README.md            # Human-facing project documentation
-└── ai-docs/             # Progressive disclosure documentation
-    ├── architecture.md  # System architecture & data flow
-    ├── api-reference.md # API endpoints documentation
-    ├── database.md      # Database schema & queries
-    ├── frontend.md      # Frontend components & UI patterns
-    ├── auth-setup.md    # Google API auth & credentials setup
-    └── roadmap.md       # Feature roadmap & planned work
+└── ai-docs/               # Progressive disclosure documentation
+    ├── architecture.md    # System architecture & data flow
+    ├── api-reference.md   # Our API endpoints documentation
+    ├── google-keep-api.md # Official Google Keep API reference
+    ├── database.md        # Database schema & queries
+    ├── frontend.md        # Frontend components & UI patterns
+    ├── auth-setup.md      # Google API auth & credentials setup
+    ├── known-issues.md    # Bug log & lessons learned
+    └── roadmap.md         # Feature roadmap & planned work
 ```
 
 ---
@@ -68,10 +70,12 @@ When working on a feature, **only load the docs you need**. Each file in `ai-doc
 | Need                              | Load This Doc                   |
 |-----------------------------------|---------------------------------|
 | Understanding system design       | `ai-docs/architecture.md`      |
-| Working on API endpoints          | `ai-docs/api-reference.md`     |
+| Working on our API endpoints      | `ai-docs/api-reference.md`     |
+| Google Keep API capabilities      | `ai-docs/google-keep-api.md`   |
 | Modifying database schema         | `ai-docs/database.md`          |
 | Changing UI/frontend behavior     | `ai-docs/frontend.md`          |
 | Setting up or debugging auth      | `ai-docs/auth-setup.md`        |
+| Debugging or reviewing past bugs  | `ai-docs/known-issues.md`      |
 | Planning next features            | `ai-docs/roadmap.md`           |
 
 > **Rule**: Do NOT load all docs at once. Use the table above to identify which doc is relevant to the current task.
@@ -182,3 +186,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - Service accounts need **domain-wide delegation** enabled in Google Admin Console
 - The frontend is a **single-page app** — all routing is client-side via API calls
 - The database is a **cache** — Google Keep is the source of truth
+- **`notes.delete()` is PERMANENT** — not a "move to trash" (see `ai-docs/known-issues.md` ISSUE-001)
+- **Labels are NOT available** in the REST API (see `ai-docs/known-issues.md` ISSUE-002)
+- **Notes cannot be edited** via the API — no PATCH/PUT method exists (see `ai-docs/known-issues.md` ISSUE-005)
+- Always check `ai-docs/known-issues.md` before implementing features to avoid repeating past mistakes

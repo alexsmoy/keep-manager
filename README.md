@@ -16,7 +16,7 @@ A local web application for managing Google Keep notes with powerful search, reg
 - **🧩 Regex Filtering** — Advanced pattern matching with saved filter presets
 - **🗑️ Mass Delete** — Select multiple notes and delete them in bulk directly from Google Keep
 - **👁️ Preview Pane** — Read-only split-pane view with quick-delete cycling
-- **📋 Checklist Support** — Properly parses checklist notes with checkbox states
+- **📋 Checklist Support** — Properly parses checklist notes (including nested items)
 - **🌙 Dark Theme** — Modern dark UI with Inter font and violet accent colors
 
 ---
@@ -124,10 +124,12 @@ Keep Manager/
 │   └── style.css        # Dark theme CSS
 ├── ai-docs/             # Detailed documentation (progressive disclosure)
 │   ├── architecture.md  # System design and data flows
-│   ├── api-reference.md # REST API documentation
+│   ├── api-reference.md # Our API endpoints documentation
+│   ├── google-keep-api.md # Official Google Keep API reference
 │   ├── database.md      # Database schema and queries
 │   ├── frontend.md      # UI components and design system
 │   ├── auth-setup.md    # Google API authentication guide
+│   ├── known-issues.md  # Bug log and lessons learned
 │   └── roadmap.md       # Feature roadmap
 ├── claude.md            # AI agent context and workflow
 ├── agents.md            # Agent entry point
@@ -177,8 +179,8 @@ sequenceDiagram
     Note over User,GoogleKeep: Delete Flow
     User->>Frontend: Select notes → Delete
     Frontend->>FastAPI: POST /api/action/delete
-    FastAPI->>GoogleKeep: Delete each note
-    FastAPI->>SQLite: Mark as trashed
+    FastAPI->>GoogleKeep: Permanently delete each note
+    FastAPI->>SQLite: Mark as trashed (hide from UI)
     FastAPI-->>Frontend: Confirmation
 ```
 

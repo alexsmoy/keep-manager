@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     massDeleteBtn.addEventListener('click', async () => {
         if (selectedNoteIds.size === 0) return;
 
-        const confirmed = confirm(`Are you sure you want to delete ${selectedNoteIds.size} notes? They will be moved to the Trash in Google Keep.`);
+        const confirmed = confirm(`⚠️ PERMANENT DELETE: Are you sure you want to permanently delete ${selectedNoteIds.size} notes? This action cannot be undone — notes will be permanently removed from Google Keep.`);
         if (!confirmed) return;
 
         await performDelete(selectedNoteIds, null);

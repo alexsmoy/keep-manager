@@ -8,10 +8,10 @@ The application has a functional MVP with the following completed features:
 - [x] FastAPI backend with REST API
 - [x] Google Keep API authentication via Service Account
 - [x] Full note sync to local SQLite cache
-- [x] Text note and checklist note parsing
+- [x] Text note and checklist note parsing (including nested child items)
 - [x] Search notes by title or body (SQL LIKE)
 - [x] Regex filtering (in-memory, case-insensitive)
-- [x] Mass delete with Google Keep API integration
+- [x] Mass delete with Google Keep API integration (permanent deletion)
 - [x] Single note quick-delete with auto-cycling to next note
 - [x] Read-only note preview pane
 - [x] Saved regex filter management
@@ -25,7 +25,7 @@ The application has a functional MVP with the following completed features:
 ### Phase 1 — Core Improvements
 | Feature                        | Priority | Complexity | Description                                        |
 |--------------------------------|----------|------------|----------------------------------------------------|
-| Label/Tag filtering            | High     | Medium     | Filter notes by Google Keep labels                 |
+| ~~Label/Tag filtering~~        | ~~High~~ | ~~Medium~~ | ⛔ **BLOCKED**: Labels not exposed in REST API (ISSUE-002) |
 | Auto-sync on startup           | High     | Low        | Trigger `sync_notes()` when server starts          |
 | Pagination / Virtual scrolling | Medium   | Medium     | Handle large note sets without browser lag          |
 | Note count badge               | Low      | Low        | Show total/filtered note count prominently          |
@@ -36,7 +36,7 @@ The application has a functional MVP with the following completed features:
 | Responsive mobile layout      | Medium   | Medium     | Stack table + preview vertically on small screens   |
 | Keyboard navigation           | Medium   | Medium     | Arrow keys to navigate notes, Enter to preview      |
 | Sort by date/title            | Medium   | Low        | Column header click to sort                         |
-| Note editing                  | Low      | High       | Edit notes and push changes back to Google Keep     |
+| ~~Note editing~~              | ~~Low~~  | ~~High~~   | ⛔ **BLOCKED**: No PATCH/PUT method in API (ISSUE-005) |
 
 ### Phase 3 — Advanced Features
 | Feature                      | Priority | Complexity | Description                                          |
@@ -61,9 +61,10 @@ flowchart LR
     E --> F["Move feature to<br/>✅ Completed"]
 ```
 
-1. Select a feature from the tables above
-2. Review only the relevant `ai-docs/` files (progressive disclosure)
-3. Implement the feature
-4. Update the relevant docs to reflect changes
-5. Move the feature to the **Completed** section
-6. Git commit with a descriptive message
+1. **Check `ai-docs/known-issues.md`** first for any API blockers or past mistakes
+2. Select a feature from the tables above
+3. Review only the relevant `ai-docs/` files (progressive disclosure)
+4. Implement the feature
+5. Update the relevant docs to reflect changes
+6. Move the feature to the **Completed** section
+7. Git commit with a descriptive message
