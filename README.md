@@ -96,12 +96,15 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+> **Tip**: If you skip this step, `run.py` will detect missing dependencies and offer to install them automatically!
+
 The `requirements.txt` includes:
 - `fastapi` - Web framework
 - `uvicorn` - ASGI server
 - `google-auth` - Google authentication
 - `google-api-python-client` - Google Keep API client
 - `python-dotenv` - Environment variable management
+- `pydantic` - Data validation
 
 ### Step 3: Google Cloud Setup
 
@@ -250,13 +253,14 @@ The `run.py` script performs comprehensive validation before starting the server
 
 1. ✅ **Python Version Check** - Ensures Python 3.8+
 2. ✅ **Virtual Environment Check** - Warns if not activated (recommended)
-3. ✅ **Dependency Check** - Verifies all required packages are installed
-4. ✅ **Credentials Check** - Confirms `credentials.json` exists
-5. ✅ **Environment Check** - Validates `.env` file and `KEEP_USER_EMAIL`
-6. ✅ **Database Check** - Initializes database if needed
-7. ✅ **API Connection Test** - Verifies Google Keep API works
-8. 🔄 **Optional Sync** - Offers to sync notes before starting
-9. 🌐 **Server Startup** - Launches the web application
+3. 📦 **Auto-Install Dependencies** - Detects missing packages and offers to install from `requirements.txt`
+4. ✅ **Dependency Verification** - Confirms all required packages are available
+5. ✅ **Credentials Check** - Confirms `credentials.json` exists
+6. ✅ **Environment Check** - Validates `.env` file and `KEEP_USER_EMAIL`
+7. ✅ **Database Check** - Initializes database if needed
+8. ✅ **API Connection Test** - Verifies Google Keep API works
+9. 🔄 **Optional Sync** - Offers to sync notes before starting
+10. 🌐 **Server Startup** - Launches the web application
 
 ### Example Output
 
@@ -269,12 +273,17 @@ Keep Manager - Setup Validation & Launcher
 ✓ Python 3.11.0 detected
 ℹ Checking virtual environment...
 ✓ Virtual environment is activated
-ℹ Checking dependencies...
-✓ FastAPI installed
-✓ Uvicorn installed
-✓ python-dotenv installed
-✓ google-auth installed
-✓ google-api-python-client installed
+ℹ Checking requirements.txt...
+✓ requirements.txt found
+ℹ Core dependencies appear to be installed
+ℹ Verifying all dependencies are available...
+✓ FastAPI is available
+✓ Uvicorn is available
+✓ python-dotenv is available
+✓ google-auth is available
+✓ google-api-python-client is available
+✓ pydantic is available
+✓ All dependencies verified!
 ℹ Checking Google Cloud credentials...
 ✓ credentials.json found
 ℹ Checking environment configuration...
@@ -302,13 +311,31 @@ Starting Keep Manager Web Server
 ℹ Press Ctrl+C to stop the server
 ```
 
+**First-time setup**: If dependencies are missing, the script will detect this and prompt:
+
+```
+ℹ Checking requirements.txt...
+✓ requirements.txt found
+⚠ Some dependencies appear to be missing
+ℹ Found requirements.txt - we can install them automatically
+
+Install dependencies from requirements.txt? [Y/n]: y
+
+Installing dependencies from requirements.txt...
+This may take a minute...
+[pip installation output]
+✓ Dependencies installed successfully!
+```
+
 ### Benefits of Using run.py
 
 - **Automated validation** - No more guessing if your setup is correct
+- **Auto-install dependencies** - Detects missing packages and installs them for you
 - **Clear error messages** - Tells you exactly what's missing or misconfigured
 - **One command** - No need to remember multiple setup steps
 - **First-time friendly** - Guides new users through any issues
 - **Database auto-init** - Creates the database automatically if missing
+- **API testing** - Verifies your Google Keep connection actually works
 - **Optional sync** - Prompts you to sync notes before starting
 
 ---

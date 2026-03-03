@@ -65,31 +65,88 @@ def check_venv():
         print_info("  Tip: Activate with 'source venv/bin/activate' or 'venv\\Scripts\\activate'")
         return True  # Not a blocker
 
+def install_requirements():
+    """Check for requirements.txt and offer to install dependencies"""
+    print_info("Checking requirements.txt...")
+
+    if not Path('requirements.txt').exists():
+        print_warning("requirements.txt not found (optional)")
+        return True
+
+    print_success("requirements.txt found")
+
+    # Quick check if dependencies might be missing
+    try:
+        import fastapi
+        import uvicorn
+        import dotenv
+        from google.auth import credentials
+        from googleapiclient import discovery
+        print_info("Core dependencies appear to be installed")
+        return True
+    except ImportError:
+        # Dependencies are missing, offer to install
+        print_warning("Some dependencies appear to be missing")
+        print_info("  Found requirements.txt - we can install them automatically")
+
+        try:
+            response = input(f"\n{Colors.YELLOW}Install dependencies from requirements.txt? [Y/n]: {Colors.END}").strip().lower()
+
+            if response in ['', 'y', 'yes']:
+                print_info("\nInstalling dependencies from requirements.txt...")
+                print_info("This may take a minute...\n")
+
+                try:
+                    result = subprocess.run(
+                        [sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'],
+                        check=True,
+                        capture_output=False
+                    )
+                    print_success("\nDependencies installed successfully!")
+                    return True
+                except subprocess.CalledProcessError as e:
+                    print_error(f"Failed to install dependencies: {e}")
+                    print_info("Please run manually: pip install -r requirements.txt")
+                    return False
+            else:
+                print_warning("Skipping dependency installation")
+                print_info("You'll need to install them manually: pip install -r requirements.txt")
+                return True  # Don't block, let dependency check fail with details
+
+        except KeyboardInterrupt:
+            print_info("\nSkipping dependency installation")
+            return True
+
 def check_dependencies():
     """Check if required dependencies are installed"""
-    print_info("Checking dependencies...")
+    print_info("Verifying all dependencies are available...")
     required_modules = [
         ('fastapi', 'FastAPI'),
         ('uvicorn', 'Uvicorn'),
         ('dotenv', 'python-dotenv'),
         ('google.auth', 'google-auth'),
         ('googleapiclient', 'google-api-python-client'),
+        ('pydantic', 'pydantic'),
     ]
 
     missing = []
     for module_name, package_name in required_modules:
         try:
             __import__(module_name)
-            print_success(f"{package_name} installed")
+            print_success(f"{package_name} is available")
         except ImportError:
             print_error(f"{package_name} not found")
             missing.append(package_name)
 
     if missing:
         print_error(f"\nMissing dependencies: {', '.join(missing)}")
-        print_info("Install with: pip install -r requirements.txt")
+        if Path('requirements.txt').exists():
+            print_info("Install with: pip install -r requirements.txt")
+        else:
+            print_info(f"Install with: pip install {' '.join(missing)}")
         return False
 
+    print_success("All dependencies verified!")
     return True
 
 def check_credentials():
@@ -242,6 +299,7 @@ def main():
     checks = [
         ("Python Version", check_python_version),
         ("Virtual Environment", check_venv),
+        ("Requirements Installation", install_requirements),
         ("Dependencies", check_dependencies),
         ("Credentials File", check_credentials),
         ("Environment Variables", check_env_file),
