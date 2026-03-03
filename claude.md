@@ -22,10 +22,13 @@
 
 ```
 Keep Manager/
+├── run.py               # 🚀 Automated setup validator & launcher
 ├── main.py              # FastAPI app — routes, API endpoints
 ├── keep_client.py       # Google Keep API service account auth
 ├── sync.py              # Sync engine — pulls notes to SQLite
 ├── db.py                # SQLite database schema & connection
+├── requirements.txt     # Python dependencies
+├── .env.template        # Environment variable template
 ├── templates/
 │   └── index.html       # Single-page frontend
 ├── static/
@@ -157,6 +160,28 @@ sequenceDiagram
 
 ## ⚙️ Running the Project
 
+### Quick Start (Recommended)
+
+```bash
+# 1. Activate virtual environment
+# Windows:
+venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
+
+# 2. Run the automated launcher (validates setup + starts server)
+python run.py
+```
+
+The `run.py` script automatically:
+- Validates Python version, dependencies, credentials, and .env configuration
+- Checks/initializes the database
+- Tests Google Keep API connection
+- Offers to sync notes
+- Starts the web server on http://localhost:8000
+
+### Manual Start (Alternative)
+
 ```bash
 # 1. Activate virtual environment
 # Windows:
@@ -167,7 +192,7 @@ source venv/bin/activate
 # 2. Set environment variables
 # Ensure .env contains KEEP_USER_EMAIL=your-email@domain.com
 
-# 3. Initialize the database
+# 3. Initialize the database (if needed)
 python db.py
 
 # 4. Sync notes from Google Keep

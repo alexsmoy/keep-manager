@@ -236,9 +236,100 @@ Open your browser and navigate to that URL to access the Keep Manager interface.
 
 ---
 
+## 🚀 Automated Run Script (Recommended)
+
+Instead of manually running each step, use the automated **run script** that validates your entire setup and starts the app:
+
+```bash
+python run.py
+```
+
+### What the Run Script Does
+
+The `run.py` script performs comprehensive validation before starting the server:
+
+1. ✅ **Python Version Check** - Ensures Python 3.8+
+2. ✅ **Virtual Environment Check** - Warns if not activated (recommended)
+3. ✅ **Dependency Check** - Verifies all required packages are installed
+4. ✅ **Credentials Check** - Confirms `credentials.json` exists
+5. ✅ **Environment Check** - Validates `.env` file and `KEEP_USER_EMAIL`
+6. ✅ **Database Check** - Initializes database if needed
+7. ✅ **API Connection Test** - Verifies Google Keep API works
+8. 🔄 **Optional Sync** - Offers to sync notes before starting
+9. 🌐 **Server Startup** - Launches the web application
+
+### Example Output
+
+```
+============================================================
+Keep Manager - Setup Validation & Launcher
+============================================================
+
+ℹ Checking Python version...
+✓ Python 3.11.0 detected
+ℹ Checking virtual environment...
+✓ Virtual environment is activated
+ℹ Checking dependencies...
+✓ FastAPI installed
+✓ Uvicorn installed
+✓ python-dotenv installed
+✓ google-auth installed
+✓ google-api-python-client installed
+ℹ Checking Google Cloud credentials...
+✓ credentials.json found
+ℹ Checking environment configuration...
+✓ .env file found
+✓ KEEP_USER_EMAIL configured: user@domain.com
+ℹ Checking database...
+✓ Database exists
+ℹ Testing Google Keep API connection...
+✓ Google Keep API connection successful
+
+============================================================
+All Checks Passed!
+============================================================
+
+✓ Your Keep Manager setup is properly configured
+
+Sync now? [y/N]: y
+Synced 150 notes.
+
+============================================================
+Starting Keep Manager Web Server
+============================================================
+
+ℹ Server will start on: http://localhost:8000
+ℹ Press Ctrl+C to stop the server
+```
+
+### Benefits of Using run.py
+
+- **Automated validation** - No more guessing if your setup is correct
+- **Clear error messages** - Tells you exactly what's missing or misconfigured
+- **One command** - No need to remember multiple setup steps
+- **First-time friendly** - Guides new users through any issues
+- **Database auto-init** - Creates the database automatically if missing
+- **Optional sync** - Prompts you to sync notes before starting
+
+---
+
 ## 🔄 Daily Usage
 
 Once setup is complete, your typical workflow is:
+
+### Quick Start (Recommended)
+
+```bash
+# Activate virtual environment
+source venv/bin/activate  # macOS/Linux
+# or
+venv\Scripts\activate     # Windows
+
+# Run the automated script (validates setup + starts server)
+python run.py
+```
+
+### Manual Start (Alternative)
 
 ```bash
 # 1. Activate virtual environment
@@ -260,6 +351,9 @@ The web interface will automatically sync after bulk deletes, but you can manual
 ## 🧪 Testing Individual Components
 
 ```bash
+# Run full setup validation (recommended)
+python run.py
+
 # Test database connection
 python db.py
 
@@ -272,6 +366,8 @@ python sync.py
 # Run with a specific email (overrides .env)
 python sync.py user@domain.com
 ```
+
+The `run.py` script is the best way to verify your entire setup at once.
 
 ---
 
@@ -337,10 +433,13 @@ For more issues and solutions, see [ai-docs/known-issues.md](ai-docs/known-issue
 
 ```
 Keep Manager/
+├── run.py               # 🚀 Automated setup validator & launcher (START HERE!)
 ├── main.py              # FastAPI app — routes and API endpoints
 ├── keep_client.py       # Google Keep API authentication
 ├── sync.py              # Note sync engine
 ├── db.py                # SQLite schema and connection
+├── requirements.txt     # Python dependencies
+├── .env.template        # Environment variable template
 ├── templates/
 │   └── index.html       # Frontend HTML
 ├── static/
