@@ -24,6 +24,11 @@ os.makedirs("templates", exist_ok=True)
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on application startup."""
+    queue_manager.start_worker()
+
 @app.get("/")
 async def read_index():
     index_path = os.path.join("templates", "index.html")
@@ -43,20 +48,28 @@ class NoteModel(BaseModel):
     snippet: str
     body: str
     has_attachments: bool
+    saved: bool
 
 @app.get("/api/notes")
-async def get_notes(search: str = "", regex: str = ""):
+async def get_notes(search: str = "", regex: str = "", include_saved: bool = False, saved_only: bool = False):
     conn = get_db()
     with conn:
         cursor = conn.cursor()
-        if search:
-            query = "SELECT id, title, snippet, body, has_attachments FROM notes WHERE trashed = 0 AND (title LIKE ? OR body LIKE ?)"
-            val = f"%{search}%"
-            cursor.execute(query, (val, val))
-        else:
-            query = "SELECT id, title, snippet, body, has_attachments FROM notes WHERE trashed = 0"
-            cursor.execute(query)
         
+        base_query = "SELECT id, title, snippet, body, has_attachments, saved FROM notes WHERE trashed = 0"
+        params = []
+
+        if saved_only:
+            base_query += " AND saved = 1"
+        elif not include_saved:
+            base_query += " AND saved = 0"
+
+        if search:
+            base_query += " AND (title LIKE ? OR body LIKE ?)"
+            val = f"%{search}%"
+            params.extend([val, val])
+        
+        cursor.execute(base_query, params)
         rows = cursor.fetchall()
         
     notes = [dict(row) for row in rows]
@@ -109,6 +122,20 @@ async def mass_delete(req: DeleteRequest, background_tasks: BackgroundTasks):
 
     user_email = os.environ.get('KEEP_USER_EMAIL')
 
+    # Verify that NONE of the requested notes are "saved"
+    conn = get_db()
+    with conn:
+        cursor = conn.cursor()
+        placeholders = ','.join(['?'] * len(req.note_ids))
+        cursor.execute(f"SELECT id FROM notes WHERE id IN ({placeholders}) AND saved = 1", req.note_ids)
+        saved_notes = [row[0] for row in cursor.fetchall()]
+
+    if saved_notes:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete notes because {len(saved_notes)} of them are MARKED AS SAVED. Please unsave them first."
+        )
+
     # Enqueue all notes for background deletion
     queue_manager.enqueue_batch(req.note_ids, user_email)
 
@@ -132,6 +159,43 @@ async def get_queue_status():
     """
     status = queue_manager.get_status()
     return status
+
+@app.put("/api/notes/{note_id:path}/save")
+async def save_note(note_id: str):
+    """Mark a note as saved to prevent accidental deletion and hide it from default view."""
+    conn = get_db()
+    with conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notes SET saved = 1 WHERE id = ?", (note_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Note not found")
+    return {"success": True, "note_id": note_id, "saved": True}
+
+@app.delete("/api/notes/{note_id:path}/save")
+async def unsave_note(note_id: str):
+    """Unmark a note as saved."""
+    conn = get_db()
+    with conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notes SET saved = 0 WHERE id = ?", (note_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Note not found")
+    return {"success": True, "note_id": note_id, "saved": False}
+
+class BatchSaveRequest(BaseModel):
+    note_ids: List[str]
+    saved: bool
+
+@app.post("/api/action/save")
+async def batch_save_notes(req: BatchSaveRequest):
+    """Toggle saved status for multiple notes."""
+    val = 1 if req.saved else 0
+    conn = get_db()
+    with conn:
+        cursor = conn.cursor()
+        placeholders = ','.join(['?'] * len(req.note_ids))
+        cursor.execute(f"UPDATE notes SET saved = ? WHERE id IN ({placeholders})", [val] + req.note_ids)
+    return {"success": True, "updated": cursor.rowcount}
 
 class FilterModel(BaseModel):
     name: str

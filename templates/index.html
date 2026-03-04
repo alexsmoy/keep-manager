@@ -23,9 +23,16 @@
 
             <button id="search-btn">Filter</button>
 
+            <div class="header-toggle">
+                <input type="checkbox" id="show-saved-toggle">
+                <label for="show-saved-toggle">Show Saved</label>
+            </div>
+
             <!-- Action Bar (shows when notes are selected) -->
             <div id="action-bar" class="action-bar-inline" style="display: none;">
                 <span class="selected-text"><strong id="selected-count">0</strong> selected</span>
+                <button id="batch-save-btn" class="btn-small btn-outline">⭐ Save</button>
+                <button id="batch-unsave-btn" class="btn-small btn-outline">Unsave</button>
                 <button id="mass-delete-btn" class="danger btn-small">Delete</button>
                 <button id="clear-selection-btn" class="btn-small btn-outline">Clear</button>
             </div>

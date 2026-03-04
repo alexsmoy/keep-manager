@@ -21,9 +21,18 @@ def init_db():
                 update_time TEXT,
                 trashed BOOLEAN,
                 archived BOOLEAN,
-                has_attachments BOOLEAN DEFAULT 0
+                has_attachments BOOLEAN DEFAULT 0,
+                saved BOOLEAN DEFAULT 0
             )
         ''')
+        
+        # Check for migration: add 'saved' column if it doesn't exist
+        cursor = conn.execute("PRAGMA table_info(notes)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'saved' not in columns:
+            print("Migrating database: adding 'saved' column to 'notes' table")
+            conn.execute("ALTER TABLE notes ADD COLUMN saved BOOLEAN DEFAULT 0")
+
         # Labels table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS labels (
@@ -31,6 +40,7 @@ def init_db():
                 name TEXT
             )
         ''')
+        # ... (rest of tables)
         # Note_Labels mapping
         conn.execute('''
             CREATE TABLE IF NOT EXISTS note_labels (

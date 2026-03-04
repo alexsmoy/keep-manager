@@ -17,7 +17,7 @@ With 20% safety margin:
 For deletes (write operations): Max 1.2 per second = ~833ms between requests
 """
 
-import asyncio
+import queue
 import time
 from datetime import datetime
 from typing import Optional, Dict, List
@@ -93,7 +93,7 @@ class QueueManager:
         self.rate_limiter = RateLimiter(requests_per_minute=72)
 
         # Queue state
-        self.queue = asyncio.Queue()
+        self.queue = queue.Queue()
         self.is_processing = False
         self.worker_thread: Optional[Thread] = None
 
@@ -115,9 +115,44 @@ class QueueManager:
         with self._lock:
             if self.worker_thread is None or not self.worker_thread.is_alive():
                 self.is_processing = True
+                
+                # Load orphans from DB before starting
+                self._load_pending_from_db()
+                
                 self.worker_thread = Thread(target=self._process_queue, daemon=True)
                 self.worker_thread.start()
                 print("Queue worker started")
+
+    def _load_pending_from_db(self):
+        """Load pending and interrupted operations from the database into the queue."""
+        conn = get_db()
+        try:
+            cursor = conn.cursor()
+            # Fetch both pending and processing (which were interrupted by a restart)
+            cursor.execute("SELECT note_id FROM pending_deletes WHERE status IN (?, ?)", 
+                          (OperationStatus.PENDING, OperationStatus.PROCESSING))
+            rows = cursor.fetchall()
+            
+            count = 0
+            for row in rows:
+                note_id = row['note_id']
+                # Check if already in queue (unlikely on startup)
+                # Note: items are dicts in the queue
+                self.queue.put({
+                    "note_id": note_id,
+                    "user_email": None # Service defaults to env var
+                })
+                count += 1
+            
+            if count > 0:
+                print(f"Resumed {count} pending deletions from database")
+                with self.stats_lock:
+                    self.stats["total_queued"] += count
+                    self.stats["queue_size"] = self.queue.qsize()
+        except Exception as e:
+            print(f"Error loading pending tasks from DB: {e}")
+        finally:
+            conn.close()
 
     def enqueue_delete(self, note_id: str, user_email: Optional[str] = None):
         """
@@ -201,6 +236,7 @@ class QueueManager:
                     self.stats["currently_processing"] = 1
                     self.stats["queue_size"] = self.queue.qsize()
 
+                print(f"Processing note: {note_id}")
                 # Update status to processing
                 self._update_db_status(note_id, OperationStatus.PROCESSING)
 
@@ -212,6 +248,7 @@ class QueueManager:
 
                 # Update database based on result
                 if success:
+                    print(f"Successfully deleted: {note_id}")
                     self._update_db_status(
                         note_id,
                         OperationStatus.COMPLETED,

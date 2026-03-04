@@ -147,6 +147,28 @@ button:disabled {
     white-space: nowrap;
 }
 
+.header-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-left: 0.5rem;
+    border-left: 1px solid var(--border-color);
+    margin-right: 0.5rem;
+}
+
+.header-toggle label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.saved-icon {
+    color: #fbbf24;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
 /* Main Split Layout */
 .main-content {
     display: flex;
@@ -326,8 +348,15 @@ input[type="checkbox"] {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
 }
 
 /* Modal Overlay and Dialog */
@@ -347,8 +376,13 @@ input[type="checkbox"] {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .modal-dialog {
@@ -368,6 +402,7 @@ input[type="checkbox"] {
         transform: translateY(-50px);
         opacity: 0;
     }
+
     to {
         transform: translateY(0);
         opacity: 1;

@@ -11,6 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearSelectionBtn = document.getElementById('clear-selection-btn');
     const statusEl = document.getElementById('status');
     const previewArea = document.getElementById('preview-area');
+    const showSavedToggle = document.getElementById('show-saved-toggle');
+    const batchSaveBtn = document.getElementById('batch-save-btn');
+    const batchUnsaveBtn = document.getElementById('batch-unsave-btn');
 
     // Modal Elements
     const modalOverlay = document.getElementById('modal-overlay');
@@ -37,6 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
     searchBtn.addEventListener('click', () => loadNotes());
     searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') loadNotes(); });
     regexInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') loadNotes(); });
+    showSavedToggle.addEventListener('change', () => loadNotes());
+
+    batchSaveBtn.addEventListener('click', () => performBatchSave(true));
+    batchUnsaveBtn.addEventListener('click', () => performBatchSave(false));
 
     // Modal Event Listeners
     modalCloseBtn.addEventListener('click', closeModal);
@@ -154,9 +161,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const search = encodeURIComponent(searchInput.value.trim());
         const regex = encodeURIComponent(regexInput.value.trim());
+        const includeSaved = showSavedToggle.checked;
 
         try {
-            const response = await fetch(`/api/notes?search=${search}&regex=${regex}`);
+            const response = await fetch(`/api/notes?search=${search}&regex=${regex}&include_saved=${includeSaved}`);
             if (!response.ok) {
                 const errData = await response.json();
                 throw new Error(errData.detail || "Failed to load notes");
@@ -164,13 +172,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             notes = data.notes;
 
-            // Clean up selections and active note if they were filtered out
-            const noteIds = new Set(notes.map(n => n.id));
-            if (activeNoteId && !noteIds.has(activeNoteId)) {
+            // Prune selection and reset UI if they are no longer in the list
+            const visibleIds = new Set(notes.map(n => n.id));
+
+            // Clear active preview if the note was filtered out/removed
+            if (activeNoteId && !visibleIds.has(activeNoteId)) {
                 clearPreviewPane();
             }
-            // Keep selected ones even if filtered out, or optionally clear them.
-            // Let's keep them selected so mass delete can still apply.
+
+            // Deselect filtered notes
+            selectedNoteIds.forEach(id => {
+                if (!visibleIds.has(id)) selectedNoteIds.delete(id);
+            });
+            selectAllCheckbox.checked = selectedNoteIds.size > 0 && selectedNoteIds.size === notes.length;
 
             statusEl.textContent = `Found ${notes.length} notes`;
             statusEl.className = 'status-indicator status-ok';
@@ -208,6 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="checkbox" class="row-checkbox" data-id="${note.id}" ${isSelected ? 'checked' : ''}>
                 </td>
                 <td class="title-col">
+                    ${note.saved ? '<span class="saved-icon" title="Saved Note">⭐ </span>' : ''}
                     ${escapeHTML(note.title) || '<em>Untitled Note</em>'}
                     ${attachmentIndicator}
                 </td>
@@ -252,11 +267,42 @@ document.addEventListener('DOMContentLoaded', () => {
         previewArea.innerHTML = `
             <div class="preview-meta" style="display: flex; justify-content: space-between; align-items: center;">
                 <strong>Read-Only Note Preview</strong>
-                <button id="single-delete-btn" class="danger" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">🗑️ Delete Note</button>
+                <div class="preview-actions">
+                    <button id="single-save-btn" class="btn-small ${note.saved ? 'btn-outline' : 'btn-primary'}" style="margin-right: 0.5rem;">
+                        ${note.saved ? '⭐ Unsave' : '⭐ Save'}
+                    </button>
+                    <button id="single-delete-btn" class="danger" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" ${note.saved ? 'disabled title="Unsave to delete"' : ''}>🗑️ Delete Note</button>
+                </div>
             </div>
             <h2 class="preview-title">${escapeHTML(note.title) || '<em>Untitled Note</em>'}</h2>
             <div class="preview-body">${escapeHTML(note.body) || '<em>Empty note body</em>'}</div>
         `;
+
+        // Handle single save/unsave click
+        document.getElementById('single-save-btn').addEventListener('click', async () => {
+            const method = note.saved ? 'DELETE' : 'PUT';
+            try {
+                const resp = await fetch(`/api/notes/${note.id}/save`, { method });
+                if (resp.ok) {
+                    note.saved = !note.saved;
+
+                    // Deselect and reset UI
+                    selectedNoteIds.delete(note.id);
+                    updateActionBar();
+
+                    await loadNotes(); // This will handle hiding if toggle is off
+
+                    // If note is still visible, refresh preview
+                    if (notes.find(n => n.id === note.id)) {
+                        showPreview(note);
+                    } else {
+                        clearPreviewPane();
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        });
 
         // Handle single delete click
         document.getElementById('single-delete-btn').addEventListener('click', () => {
@@ -311,9 +357,49 @@ document.addEventListener('DOMContentLoaded', () => {
         if (count > 0) {
             actionBar.style.display = 'flex';
             statusEl.style.display = 'none'; // Hide status when action bar is visible
+
+            // Disable delete if any saved notes are selected
+            const selectedArray = Array.from(selectedNoteIds);
+            const selectedNotes = notes.filter(n => selectedNoteIds.has(n.id));
+            const hasSaved = selectedNotes.some(n => n.saved);
+
+            if (hasSaved) {
+                massDeleteBtn.disabled = true;
+                massDeleteBtn.title = "Unsave selected notes before deleting";
+            } else {
+                massDeleteBtn.disabled = false;
+                massDeleteBtn.title = "";
+            }
         } else {
             actionBar.style.display = 'none';
             statusEl.style.display = 'block'; // Show status when action bar is hidden
+        }
+    }
+
+    async function performBatchSave(isSaving) {
+        if (selectedNoteIds.size === 0) return;
+
+        try {
+            const resp = await fetch('/api/action/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    note_ids: Array.from(selectedNoteIds),
+                    saved: isSaving
+                })
+            });
+
+            if (resp.ok) {
+                selectedNoteIds.clear();
+                selectAllCheckbox.checked = false;
+                await loadNotes();
+            } else {
+                const err = await resp.json();
+                showModal('Error', `<p>Batch save failed: ${err.detail || 'Unknown error'}</p>`, 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showModal('Error', `<p>Network error during batch save: ${err.message}</p>`, 'error');
         }
     }
 
@@ -449,8 +535,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const modalType = result.quota_exceeded ? 'warning' : (result.failed > 0 ? 'error' : 'info');
         const modalTitleText = result.quota_exceeded ? 'Quota Limit Reached' :
-                                result.failed > 0 ? 'Deletion Partially Failed' :
-                                'Deletion Complete';
+            result.failed > 0 ? 'Deletion Partially Failed' :
+                'Deletion Complete';
 
         showModal(modalTitleText, bodyHTML, modalType);
     }
