@@ -12,19 +12,23 @@ graph TB
 
     subgraph "Local Server"
         API["FastAPI Backend<br/>main.py"]
+        QUEUE["Queue Manager<br/>queue_manager.py<br/>(Background Thread)"]
         AUTH["Auth Module<br/>keep_client.py"]
         SYNC["Sync Engine<br/>sync.py"]
         DB["SQLite Cache<br/>keep_cache.db"]
     end
 
     subgraph "Google Cloud"
-        GAPI["Google Keep API v1"]
+        GAPI["Google Keep API v1<br/>(Rate Limited)"]
         GSA["Service Account<br/>+ Domain-Wide Delegation"]
     end
 
     UI -->|"HTTP REST"| API
+    UI -->|"Poll Status"| API
     API -->|"Read/Write"| DB
-    API -->|"Delete Notes"| AUTH
+    API -->|"Enqueue Deletes"| QUEUE
+    QUEUE -->|"Rate-Limited Deletes"| AUTH
+    QUEUE -->|"Update Status"| DB
     AUTH -->|"OAuth2 JWT"| GSA
     GSA -->|"Impersonate User"| GAPI
     SYNC -->|"Pull Notes"| GAPI
@@ -61,6 +65,43 @@ graph TB
 - Left pane: searchable/filterable notes table with checkboxes
 - Right pane: read-only note preview with inline delete
 - Dark theme with Inter font and violet accent colors
+- Polls `/api/queue/status` every 2 seconds during active deletions
+- Shows queue status indicator in header
+
+### `queue_manager.py` — Background Queue System ⭐ NEW
+
+**Purpose**: Asynchronous deletion processing with rate limiting to respect GCP quotas.
+
+**Components**:
+1. **`RateLimiter`** class:
+   - Token bucket implementation
+   - Enforces 72 writes/minute (90/min with 20% safety margin)
+   - Thread-safe with mutex lock
+   - Calculates minimum interval between requests (~833ms)
+
+2. **`QueueManager`** singleton class:
+   - Manages an asyncio.Queue for pending deletions
+   - Runs background worker thread (daemon)
+   - Processes queue with rate limiting
+   - Tracks statistics (queued, processed, succeeded, failed)
+   - Updates `pending_deletes` table in database
+
+**Worker Thread Flow**:
+```
+1. Get next note from queue (blocking, 1s timeout)
+2. Update DB: status='processing'
+3. Enforce rate limit (wait if needed)
+4. Attempt deletion with retry logic (3 attempts, exponential backoff)
+5. Update DB: status='completed' or 'failed'
+6. Update statistics
+7. Repeat until queue is empty
+```
+
+**Error Handling**:
+- **404**: Treat as success (already deleted)
+- **429/403 quota**: Exponential backoff (1s, 2s, 4s), then fail
+- **403 permission**: Immediate failure with clear message
+- **Other errors**: Immediate failure with error code/message
 
 ## Data Flow — Note Sync
 
@@ -110,32 +151,94 @@ sequenceDiagram
     Browser-->>User: Display filtered notes
 ```
 
-## Data Flow — Delete Notes
+## Data Flow — Delete Notes (Queue-Based)
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Browser as Frontend
-    participant Server as FastAPI
+    participant Server as FastAPI (main.py)
+    participant Queue as QueueManager (Background Thread)
     participant DB as SQLite
     participant API as Google Keep API
 
+    Note over User,API: Phase 1: Immediate UI Response
     User->>Browser: Select notes → Click Delete
-    Browser->>Server: POST /api/action/delete {note_ids}
-    loop For each note_id
-        Server->>API: notes().delete(name=id)
-        API-->>Server: 200 OK
-        Server->>DB: UPDATE SET trashed=1
+    Browser->>Server: POST /api/action/delete {note_ids: [A, B, C]}
+    Server->>DB: UPDATE notes SET trashed=1 WHERE id IN (A,B,C)
+    Server->>DB: INSERT INTO pending_deletes (A,B,C) status='pending'
+    Server->>Queue: Enqueue [A, B, C]
+    Server-->>Browser: {queued: 3, note_ids: [A,B,C]}
+    Browser->>DB: GET /api/notes (notes A,B,C excluded - trashed=1)
+    Browser-->>User: Notes immediately disappear from UI
+
+    Note over User,API: Phase 2: Background Processing (72/minute)
+    loop Every 2 seconds
+        Browser->>Server: GET /api/queue/status
+        Server->>DB: SELECT COUNT(*) FROM pending_deletes WHERE status='pending'
+        Server-->>Browser: {queue_size: N, ...}
+        Browser-->>User: "Processing N deletions" indicator
     end
-    Server->>Server: Queue background sync
-    Server-->>Browser: {deleted: N, ids: [...]}
-    Browser->>Browser: Reload notes table
+
+    Note over Queue,API: Background Worker Thread
+    Queue->>Queue: Get next note (A) from queue
+    Queue->>DB: UPDATE pending_deletes SET status='processing' WHERE note_id=A
+    Queue->>Queue: Rate limit wait (~833ms)
+    Queue->>API: notes().delete(name=A)
+    alt Success
+        API-->>Queue: 200 OK
+        Queue->>DB: UPDATE pending_deletes SET status='completed'
+    else Error 404
+        API-->>Queue: 404 Not Found
+        Queue->>DB: UPDATE pending_deletes SET status='completed' (already deleted)
+    else Error 429/403 Quota
+        API-->>Queue: 429 Rate Limit
+        Queue->>Queue: Exponential backoff (1s, 2s, 4s)
+        Queue->>API: Retry up to 3 times
+        alt Retry succeeds
+            API-->>Queue: 200 OK
+            Queue->>DB: UPDATE pending_deletes SET status='completed'
+        else Retry fails
+            Queue->>DB: UPDATE pending_deletes SET status='failed', last_error='Quota exceeded'
+        end
+    end
+    Queue->>Queue: Repeat for notes B, C, ...
+
+    Note over Browser,User: User notified of failures via poll
+    Browser->>Server: GET /api/queue/status
+    Server->>DB: SELECT * FROM pending_deletes WHERE status='failed'
+    Server-->>Browser: {recent_failures: [{note_id: X, error: "..."}]}
+    Browser-->>User: Error modal with details
 ```
 
 ## Key Design Decisions
 
 1. **Local-first caching** — Google Keep API is slow for searching; SQLite enables instant local queries
 2. **Service Account auth** — avoids OAuth consent flow; requires Google Workspace domain
-3. **Background sync after delete** — keeps local cache consistent without blocking the UI
-4. **Vanilla frontend** — no build step, no dependencies, fast iteration
-5. **Regex over SQL LIKE** — SQL LIKE handles basic search, Python regex handles advanced patterns in-memory
+3. **Background queue for deletes** ⭐ — Respects GCP quotas (72 writes/min) while keeping UI responsive
+4. **Optimistic UI updates** — Notes disappear immediately; actual deletion happens asynchronously
+5. **Background sync after delete** — keeps local cache consistent without blocking the UI
+6. **Vanilla frontend** — no build step, no dependencies, fast iteration
+7. **Regex over SQL LIKE** — SQL LIKE handles basic search, Python regex handles advanced patterns in-memory
+8. **Rate limiting with margin** — 20% safety margin (72 vs 90 req/min) prevents quota errors
+9. **Thread-based queue** — Uses Python threading (not asyncio) for compatibility with sync API client
+10. **Status polling** — Frontend polls queue status every 2 seconds for real-time progress
+
+## GCP Quota Management
+
+**Published Limits** (from GCP Console):
+- 90 read requests/minute
+- 90 write requests/minute (includes DELETE)
+- 30 create requests/minute
+
+**Our Implementation** (with 20% safety margin):
+- Reads: 72/minute (unused - only used during sync)
+- Writes: **72/minute = 1.2/second = ~833ms interval**
+- Creates: 24/minute (unused - no create functionality)
+
+**Rate Limiter Strategy**:
+```python
+min_interval = 60.0 / 72  # 0.833 seconds
+# Enforced via token bucket in RateLimiter class
+# Prevents bursting; guarantees safe spacing
+```

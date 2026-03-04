@@ -59,11 +59,13 @@ Fetch notes from the local SQLite cache with optional search and regex filtering
 
 ---
 
-### `POST /api/action/delete` — Delete Notes
+### `POST /api/action/delete` — Queue Notes for Deletion
 
-Delete one or more notes via the Google Keep API and mark them as trashed locally.
+Queue one or more notes for background deletion via the Google Keep API.
 
 **⚠️ CRITICAL**: This performs **PERMANENT deletion** from Google Keep (not move to trash). There is no undo.
+
+**Background Processing**: Notes are queued and deleted asynchronously at a rate of ~72 deletions/minute to respect GCP quotas. The UI is immediately updated (optimistic), while actual deletion happens in the background.
 
 **Request Body**:
 ```json
@@ -72,92 +74,103 @@ Delete one or more notes via the Google Keep API and mark them as trashed locall
 }
 ```
 
-**Successful Response**: `200 OK`
+**Response**: `200 OK`
 ```json
 {
   "success": true,
-  "deleted": 2,
-  "failed": 0,
-  "success_ids": ["notes/abc123", "notes/def456"],
-  "errors": [],
-  "quota_exceeded": false,
-  "warning": null
-}
-```
-
-**Partial Failure Response**: `200 OK`
-```json
-{
-  "success": true,
-  "deleted": 1,
-  "failed": 1,
-  "success_ids": ["notes/abc123"],
-  "errors": [
-    {
-      "note_id": "notes/def456",
-      "error": "HTTP 404: Note not found"
-    }
-  ],
-  "quota_exceeded": false,
-  "warning": "1 note(s) failed to delete. Check error details."
-}
-```
-
-**Quota Exceeded Response**: `200 OK`
-```json
-{
-  "success": false,
-  "deleted": 50,
-  "failed": 50,
-  "success_ids": ["notes/abc123", ...],
-  "errors": [
-    {
-      "note_id": "notes/xyz789",
-      "error": "Quota exceeded after 3 retries"
-    },
-    ...
-  ],
-  "quota_exceeded": true,
-  "warning": "API quota limit reached. Some notes were not deleted. Please wait a few minutes and try again."
+  "queued": 2,
+  "note_ids": ["notes/abc123", "notes/def456"],
+  "message": "Queued 2 note(s) for deletion. Processing in background..."
 }
 ```
 
 **Error Response**: `500 Internal Server Error`
 ```json
-{ "detail": "Failed to initialize Keep Service. Check credentials and .env configuration." }
+{ "detail": "Failed to queue deletion. Check system logs." }
 ```
 
 **Response Fields**:
-| Field             | Type    | Description                                              |
-|-------------------|---------|----------------------------------------------------------|
-| `success`         | boolean | `true` if at least one note was deleted successfully    |
-| `deleted`         | integer | Count of successfully deleted notes                      |
-| `failed`          | integer | Count of notes that failed to delete                     |
-| `success_ids`     | array   | Note IDs that were successfully deleted                  |
-| `errors`          | array   | Array of `{note_id, error}` objects for failed deletions |
-| `quota_exceeded`  | boolean | `true` if Google API quota limit was hit                 |
-| `warning`         | string? | User-facing warning message (null if no warnings)        |
+| Field       | Type    | Description                                        |
+|-------------|---------|----------------------------------------------------|
+| `success`   | boolean | Always `true` if notes were queued successfully   |
+| `queued`    | integer | Count of notes added to deletion queue            |
+| `note_ids`  | array   | Note IDs that were queued for deletion            |
+| `message`   | string  | User-facing status message                         |
 
 **Behavior**:
-1. **Rate limiting**: Adds 50ms delay between requests (max 20 req/sec) to avoid quota limits
-2. **Retry logic**: Each delete is retried up to 3 times with exponential backoff (1s, 2s, 4s)
-3. **Error handling**:
-   - **429 (Rate Limit)**: Retries with backoff
-   - **403 with "quota"**: Stops batch, sets `quota_exceeded = true`
-   - **404 (Not Found)**: Treats as success (note already deleted)
-   - **403 (Permission)**: Returns clear permission error
-   - **Other errors**: Returns HTTP error code and message
-4. **Quota protection**: If quota is exceeded, remaining notes are marked as "Skipped due to quota limit"
-5. **Local DB update**: Successfully deleted notes are marked `trashed = 1` in SQLite
-6. **Background sync**: Queues background task to reconcile local DB with remote state
-7. **Partial success**: Returns detailed breakdown of successes and failures
+1. **Immediate DB update**: Notes are marked `trashed = 1` in SQLite instantly
+2. **Queue insertion**: Each note_id is added to `pending_deletes` table with status='pending'
+3. **Background processing**: Worker thread processes queue at rate of 72 deletions/minute
+4. **Rate limiting**: Enforced by background worker (not in this endpoint)
+5. **Non-blocking**: Returns immediately, deletion happens asynchronously
+6. **UI optimization**: Frontend reloads notes immediately (queued notes are already hidden)
 
 **Important Notes**:
-- ⚠️ **No batch API exists** — notes are deleted individually in sequence
-- Deletion is **permanent** and **irreversible** in Google Keep
-- Large batches (100+ notes) may hit quota limits — recommend 50-100 notes at a time
-- `success` field is `true` if *any* notes were deleted (partial success counts as success)
-- Frontend displays detailed error modal for failures and quota issues
+- ⚠️ **Deletion is asynchronous** — actual Google Keep deletion happens in background
+- ⚠️ **Deletion is permanent** — no undo once processed
+- ✅ **UI is non-blocking** — user can continue working immediately
+- ✅ **Respects quotas** — background worker enforces 72 writes/minute limit (20% margin)
+- Monitor deletion progress via `GET /api/queue/status`
+
+---
+
+### `GET /api/queue/status` — Get Deletion Queue Status
+
+Get real-time status of the background deletion queue.
+
+**Response**: `200 OK`
+```json
+{
+  "queue_size": 15,
+  "currently_processing": 1,
+  "total_queued": 150,
+  "total_processed": 134,
+  "total_succeeded": 132,
+  "total_failed": 2,
+  "status_counts": {
+    "pending": 14,
+    "processing": 1,
+    "completed": 132,
+    "failed": 2
+  },
+  "recent_failures": [
+    {
+      "note_id": "notes/xyz789",
+      "last_error": "HTTP 404: Note not found",
+      "attempts": 3,
+      "queued_at": "2026-03-04T10:30:00Z"
+    }
+  ],
+  "processing": [
+    {
+      "note_id": "notes/abc123",
+      "attempts": 1,
+      "queued_at": "2026-03-04T10:32:15Z"
+    }
+  ],
+  "worker_alive": true
+}
+```
+
+**Response Fields**:
+| Field                 | Type    | Description                                        |
+|-----------------------|---------|----------------------------------------------------|
+| `queue_size`          | integer | Number of notes waiting in memory queue           |
+| `currently_processing`| integer | Number of notes being processed right now (0 or 1)|
+| `total_queued`        | integer | Total notes queued since app start                |
+| `total_processed`     | integer | Total notes processed (completed + failed)        |
+| `total_succeeded`     | integer | Total successful deletions                         |
+| `total_failed`        | integer | Total failed deletions                             |
+| `status_counts`       | object  | Breakdown by status from database                  |
+| `recent_failures`     | array   | Last 10 failed operations with error details      |
+| `processing`          | array   | Currently processing note(s)                       |
+| `worker_alive`        | boolean | Whether background worker thread is running        |
+
+**Frontend Usage**:
+- Poll this endpoint every 2-3 seconds while deletions are in progress
+- Show queue status indicator when `queue_size + pending + processing > 0`
+- Display errors from `recent_failures` to user
+- Stop polling when queue is empty
 
 ---
 

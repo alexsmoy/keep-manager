@@ -12,9 +12,11 @@
 ### Key Capabilities
 - Sync Google Keep notes to a local SQLite database
 - Search and regex-filter notes
-- Mass-delete notes (with live Google Keep API deletion)
+- Mass-delete notes (with background queue and rate limiting)
 - Read-only note preview pane with quick delete
 - Saved regex filters
+- Non-blocking UI during deletions (background processing)
+- Real-time queue status monitoring
 
 ---
 
@@ -24,6 +26,7 @@
 Keep Manager/
 ├── run.py               # 🚀 Automated setup validator & launcher
 ├── main.py              # FastAPI app — routes, API endpoints
+├── queue_manager.py     # 🔄 Background queue for rate-limited deletions
 ├── keep_client.py       # Google Keep API service account auth
 ├── sync.py              # Sync engine — pulls notes to SQLite
 ├── db.py                # SQLite database schema & connection

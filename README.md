@@ -14,44 +14,77 @@ A local web application for managing Google Keep notes with powerful search, reg
 - **🔄 Sync Notes** — Pull all Google Keep notes into a fast local SQLite cache
 - **🔍 Smart Search** — Instant text search across titles and bodies
 - **🧩 Regex Filtering** — Advanced pattern matching with saved filter presets
-- **🗑️ Mass Delete** — Select multiple notes and delete them in bulk directly from Google Keep
+- **🗑️ Smart Mass Delete** — Background queue system with rate limiting (respects GCP quotas)
+- **⚡ Non-Blocking UI** — Continue working while deletions process in background
+- **📊 Real-Time Status** — Live queue monitoring with progress updates
 - **👁️ Preview Pane** — Read-only split-pane view with quick-delete cycling
 - **📋 Checklist Support** — Properly parses checklist notes (including nested items)
 - **🌙 Dark Theme** — Modern dark UI with Inter font and violet accent colors
+- **🛡️ Resilient Operations** — Automatic retries with exponential backoff for transient errors
 
 ---
 
 ## 🏗️ Architecture
 
 ```mermaid
-graph LR
+graph TB
     subgraph Browser
-        UI["Single-Page App<br/>HTML + CSS + JS"]
+        UI["Single-Page App<br/>HTML + CSS + JS<br/>(Non-Blocking UI)"]
     end
 
     subgraph "Local Server"
-        API["FastAPI"]
-        DB["SQLite Cache"]
+        API["FastAPI<br/>REST Endpoints"]
+        QUEUE["Background Queue<br/>Rate Limiter<br/>(72 writes/min)"]
+        DB["SQLite Cache<br/>+ Queue Status"]
     end
 
     subgraph "Google Cloud"
-        Keep["Google Keep API"]
+        Keep["Google Keep API v1<br/>(Rate Limited)"]
     end
 
-    UI <-->|REST API| API
+    UI <-->|"REST API<br/>Poll Status"| API
     API <-->|Read/Write| DB
-    API <-->|Auth + CRUD| Keep
+    API -->|Enqueue| QUEUE
+    QUEUE -->|"Rate-Limited<br/>Deletes"| Keep
+    QUEUE <-->|"Track Status"| DB
+    API -->|Sync| Keep
 ```
 
 ### Tech Stack
 
-| Layer      | Technology                    |
-|------------|-------------------------------|
-| Backend    | Python, FastAPI, Uvicorn      |
-| Database   | SQLite                        |
-| Frontend   | HTML5, CSS3, Vanilla JS       |
-| API        | Google Keep API v1            |
-| Auth       | Service Account + Domain-Wide Delegation |
+| Layer           | Technology                    |
+|-----------------|-------------------------------|
+| Backend         | Python, FastAPI, Uvicorn      |
+| Queue System    | Python Threading, asyncio.Queue |
+| Database        | SQLite                        |
+| Frontend        | HTML5, CSS3, Vanilla JS       |
+| API             | Google Keep API v1            |
+| Auth            | Service Account + Domain-Wide Delegation |
+| Rate Limiting   | Token Bucket Algorithm (72 req/min) |
+
+### Background Queue System 🔄
+
+Keep Manager uses a sophisticated background queue to handle deletions while respecting Google's API rate limits:
+
+**How It Works:**
+1. **Immediate UI Response** — Notes are marked as deleted and disappear from your view instantly
+2. **Background Processing** — Actual API deletions happen in a background worker thread
+3. **Rate Limiting** — Enforces 72 deletions/minute (20% safety margin below Google's 90/min limit)
+4. **Retry Logic** — Automatically retries failed deletions with exponential backoff
+5. **Status Monitoring** — Real-time progress updates in the UI
+
+**Performance:**
+- Small batches (1-10 notes): ~10 seconds
+- Medium batches (50 notes): ~42 seconds
+- Large batches (100 notes): ~84 seconds
+- Very large batches (500+ notes): ~7-14 minutes
+
+**Benefits:**
+- ✅ Never blocks the UI — you can continue searching and filtering
+- ✅ Handles unlimited batch sizes safely
+- ✅ Prevents quota errors with conservative rate limiting
+- ✅ Resilient to network issues and transient errors
+- ✅ Transparent progress tracking
 
 ---
 
@@ -440,6 +473,8 @@ For more issues and solutions, see [ai-docs/known-issues.md](ai-docs/known-issue
 ## ⚠️ Important Warnings
 
 - **Deletions are PERMANENT**: The Google Keep API's `delete()` method permanently removes notes, it does NOT move them to trash. There is no undo. Always double-check before mass deleting.
+- **Background processing**: Deletions happen asynchronously via a background queue. Large batches may take several minutes to complete.
+- **Rate limiting**: Google Keep API limits to 90 writes/minute. Our system respects this with 20% margin (72/min).
 - **Labels not supported**: The REST API does not expose labels/tags (see [ai-docs/known-issues.md](ai-docs/known-issues.md) ISSUE-002)
 - **Read-only notes**: Notes cannot be edited via the API — only viewed and deleted
 - **Workspace only**: Personal Gmail accounts cannot use this application
@@ -451,8 +486,12 @@ For more issues and solutions, see [ai-docs/known-issues.md](ai-docs/known-issue
 - **Regex Power**: Use patterns like `\byoutube\.com\b` to find all notes with YouTube links
 - **Save Filters**: Store frequently-used regex patterns for quick access
 - **Bulk Operations**: Select multiple notes with checkboxes for mass deletion
+- **Non-Blocking Deletions**: Notes disappear from UI immediately, while actual deletion happens in background
+- **Monitor Progress**: Watch the queue status indicator in the header to track deletion progress
 - **Preview Cycling**: Delete a note from the preview pane to auto-cycle to the next note
 - **Background Sync**: The app automatically syncs after deletions to keep cache fresh
+- **Large Batches**: Can safely delete hundreds or thousands of notes — queue system handles rate limiting
+- **Performance**: Expect ~72 deletions per minute (10 notes = ~10 seconds, 500 notes = ~7 minutes)
 
 ---
 
@@ -462,6 +501,7 @@ For more issues and solutions, see [ai-docs/known-issues.md](ai-docs/known-issue
 Keep Manager/
 ├── run.py               # 🚀 Automated setup validator & launcher (START HERE!)
 ├── main.py              # FastAPI app — routes and API endpoints
+├── queue_manager.py     # 🔄 Background queue with rate limiting
 ├── keep_client.py       # Google Keep API authentication
 ├── sync.py              # Note sync engine
 ├── db.py                # SQLite schema and connection
@@ -490,14 +530,15 @@ Keep Manager/
 
 ## 🔌 API Overview
 
-| Method | Endpoint              | Description                 |
-|--------|-----------------------|-----------------------------|
-| GET    | `/`                   | Serve the web frontend      |
-| GET    | `/api/health`         | Health check                |
-| GET    | `/api/notes`          | List/search/filter notes    |
-| POST   | `/api/action/delete`  | Delete notes from Keep      |
-| GET    | `/api/filters`        | List saved regex filters    |
-| POST   | `/api/filters`        | Save a new regex filter     |
+| Method | Endpoint              | Description                            |
+|--------|-----------------------|----------------------------------------|
+| GET    | `/`                   | Serve the web frontend                 |
+| GET    | `/api/health`         | Health check                           |
+| GET    | `/api/notes`          | List/search/filter notes               |
+| POST   | `/api/action/delete`  | Queue notes for background deletion    |
+| GET    | `/api/queue/status`   | Get deletion queue status & statistics |
+| GET    | `/api/filters`        | List saved regex filters               |
+| POST   | `/api/filters`        | Save a new regex filter                |
 
 See [ai-docs/api-reference.md](ai-docs/api-reference.md) for full documentation.
 
@@ -510,6 +551,7 @@ sequenceDiagram
     participant User
     participant Frontend
     participant FastAPI
+    participant Queue as Background Queue
     participant SQLite
     participant GoogleKeep
 
@@ -526,12 +568,28 @@ sequenceDiagram
     FastAPI-->>Frontend: JSON response
     Frontend-->>User: Render table
 
-    Note over User,GoogleKeep: Delete Flow
+    Note over User,GoogleKeep: Queue-Based Delete Flow
     User->>Frontend: Select notes → Delete
     Frontend->>FastAPI: POST /api/action/delete
-    FastAPI->>GoogleKeep: Permanently delete each note
-    FastAPI->>SQLite: Mark as trashed (hide from UI)
-    FastAPI-->>Frontend: Confirmation
+    FastAPI->>SQLite: Mark as trashed (immediate)
+    FastAPI->>Queue: Enqueue note IDs
+    FastAPI-->>Frontend: {queued: N} (instant response)
+    Frontend->>Frontend: Hide notes from table
+    Frontend-->>User: Notes disappear immediately
+
+    loop Every 2 seconds
+        Frontend->>FastAPI: GET /api/queue/status
+        FastAPI-->>Frontend: {queue_size, processing...}
+        Frontend-->>User: Show "Processing N deletions"
+    end
+
+    Note over Queue,GoogleKeep: Background Processing (72/min)
+    loop For each note (rate-limited)
+        Queue->>Queue: Wait ~833ms (rate limit)
+        Queue->>GoogleKeep: DELETE /notes/{id}
+        GoogleKeep-->>Queue: 200 OK
+        Queue->>SQLite: UPDATE status=completed
+    end
 ```
 
 ---

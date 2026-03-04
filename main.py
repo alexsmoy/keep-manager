@@ -1,17 +1,16 @@
 import os
 import re
-import time
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict
-from googleapiclient.errors import HttpError
 
 from db import get_db
 from keep_client import get_keep_service
 from sync import sync_notes
+from queue_manager import queue_manager
 
 # Load environment variables from .env file
 load_dotenv()
@@ -81,144 +80,58 @@ class DeleteRequest(BaseModel):
 
 class DeleteResponse(BaseModel):
     success: bool
-    deleted: int
-    failed: int
-    success_ids: List[str]
-    errors: List[Dict[str, str]]
-    quota_exceeded: bool
-    warning: Optional[str] = None
-
-def delete_note_with_retry(service, note_id: str, max_retries: int = 3) -> tuple[bool, Optional[str]]:
-    """
-    Delete a single note with exponential backoff retry logic.
-
-    Returns:
-        (success: bool, error_message: Optional[str])
-    """
-    for attempt in range(max_retries):
-        try:
-            service.notes().delete(name=note_id).execute()
-            return (True, None)
-        except HttpError as e:
-            error_code = e.resp.status
-            error_reason = e.error_details if hasattr(e, 'error_details') else str(e)
-
-            # Quota exceeded errors (429 or specific 403 quota errors)
-            if error_code == 429 or (error_code == 403 and 'quota' in str(e).lower()):
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 1s, 2s, 4s
-                    wait_time = 2 ** attempt
-                    print(f"Quota/rate limit hit for {note_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    return (False, f"Quota exceeded after {max_retries} retries")
-
-            # Resource not found (note already deleted)
-            elif error_code == 404:
-                print(f"Note {note_id} not found (already deleted?)")
-                return (True, None)  # Consider this a success
-
-            # Permission denied
-            elif error_code == 403:
-                return (False, "Permission denied - check service account permissions")
-
-            # Other errors
-            else:
-                return (False, f"HTTP {error_code}: {str(e)[:100]}")
-
-        except Exception as e:
-            # Non-HTTP errors
-            return (False, f"Unexpected error: {str(e)[:100]}")
-
-    return (False, "Max retries exceeded")
+    queued: int
+    note_ids: List[str]
+    message: str
 
 @app.post("/api/action/delete", response_model=DeleteResponse)
 async def mass_delete(req: DeleteRequest, background_tasks: BackgroundTasks):
     """
-    Delete multiple notes with graceful error handling.
+    Queue notes for deletion in the background.
 
-    NOTE: Google Keep API has NO batch delete method - we must delete notes individually.
-    This endpoint handles rate limiting, retries, and returns detailed error information.
+    This endpoint immediately marks notes as pending deletion in the UI and queues
+    them for background processing with rate limiting. The UI remains responsive
+    while deletions happen in the background.
+
+    NOTE: Google Keep API notes.delete() is a PERMANENT deletion, not a "move to trash".
+    There is no undo. See ai-docs/google-keep-api.md and ai-docs/known-issues.md (ISSUE-001).
+
+    Rate Limiting: Backend queue processes max 72 deletes/minute (1.2/second) to stay
+    within GCP quotas with 20% safety margin.
     """
     if not req.note_ids:
         return DeleteResponse(
             success=True,
-            deleted=0,
-            failed=0,
-            success_ids=[],
-            errors=[],
-            quota_exceeded=False
+            queued=0,
+            note_ids=[],
+            message="No notes to delete"
         )
 
-    service = get_keep_service()
-    if not service:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to initialize Keep Service. Check credentials and .env configuration."
-        )
+    user_email = os.environ.get('KEEP_USER_EMAIL')
 
-    conn = get_db()
-    success_ids = []
-    errors = []
-    quota_exceeded = False
+    # Enqueue all notes for background deletion
+    queue_manager.enqueue_batch(req.note_ids, user_email)
 
-    # NOTE: Google Keep API notes.delete() is a PERMANENT deletion, not a "move to trash".
-    # There is no undo. See ai-docs/google-keep-api.md and ai-docs/known-issues.md (ISSUE-001).
-
-    # Add small delay between requests to avoid hitting rate limits (50ms per request)
-    for i, note_id in enumerate(req.note_ids):
-        if i > 0:
-            time.sleep(0.05)  # 50ms delay = max 20 requests/second
-
-        success, error_msg = delete_note_with_retry(service, note_id)
-
-        if success:
-            # Mark as trashed locally to hide from UI pending next sync
-            try:
-                with conn:
-                    conn.execute("UPDATE notes SET trashed = 1 WHERE id = ?", (note_id,))
-                success_ids.append(note_id)
-            except Exception as db_error:
-                print(f"Database error for {note_id}: {db_error}")
-                # Still count as success since API deletion worked
-                success_ids.append(note_id)
-        else:
-            errors.append({
-                "note_id": note_id,
-                "error": error_msg
-            })
-
-            # Check if this is a quota error
-            if error_msg and "quota" in error_msg.lower():
-                quota_exceeded = True
-                print(f"Quota exceeded - stopping deletion batch at {i + 1}/{len(req.note_ids)} notes")
-                # Add remaining notes as failed
-                for remaining_id in req.note_ids[i + 1:]:
-                    errors.append({
-                        "note_id": remaining_id,
-                        "error": "Skipped due to quota limit"
-                    })
-                break
-
-    # Trigger a background sync to keep local DB clean with remote state
+    # Trigger a background sync after queue processes (delayed)
     background_tasks.add_task(sync_notes)
 
-    warning = None
-    if quota_exceeded:
-        warning = "API quota limit reached. Some notes were not deleted. Please wait a few minutes and try again."
-    elif errors and not quota_exceeded:
-        warning = f"{len(errors)} note(s) failed to delete. Check error details."
-
     return DeleteResponse(
-        success=len(success_ids) > 0 or len(errors) == 0,
-        deleted=len(success_ids),
-        failed=len(errors),
-        success_ids=success_ids,
-        errors=errors,
-        quota_exceeded=quota_exceeded,
-        warning=warning
+        success=True,
+        queued=len(req.note_ids),
+        note_ids=req.note_ids,
+        message=f"Queued {len(req.note_ids)} note(s) for deletion. Processing in background..."
     )
+
+@app.get("/api/queue/status")
+async def get_queue_status():
+    """
+    Get current status of the background deletion queue.
+
+    Returns statistics about pending, processing, completed, and failed operations.
+    Frontend should poll this endpoint every few seconds to update the UI.
+    """
+    status = queue_manager.get_status()
+    return status
 
 class FilterModel(BaseModel):
     name: str

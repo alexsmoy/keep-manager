@@ -127,9 +127,10 @@ The Google Keep API does NOT have a PATCH or PUT method for notes. Once a note i
 ### ISSUE-006: No Batch Delete API - Individual Calls Required
 
 **Discovered**: 2026-03-03
+**Updated**: 2026-03-04 (Implemented background queue system)
 **Severity**: Medium
-**Status**: Fixed (with workarounds)
-**Files Affected**: `main.py`, `static/app.js`
+**Status**: Fixed (background queue with rate limiting)
+**Files Affected**: `main.py`, `static/app.js`, `queue_manager.py`, `db.py`
 
 #### Problem
 There is **no batch delete endpoint** in the Google Keep API. The API only provides individual `notes.delete()` calls. When users select many notes for mass deletion, the backend must make individual API requests in a loop, which:
@@ -145,52 +146,76 @@ Initially assumed there would be a batch operation similar to `permissions.batch
 
 There is no `notes.batchDelete` method.
 
-#### Fix Applied
+#### Fix Applied (v2 - Background Queue System)
+
+**New Architecture (`queue_manager.py`):**
+- Implemented singleton `QueueManager` class with background worker thread
+- Token bucket `RateLimiter` enforces GCP quota limits:
+  - 72 writes/minute (90/min with 20% safety margin)
+  - ~833ms between requests (1.2 requests/second)
+- Background worker processes queue continuously
+- Retry logic with exponential backoff (3 attempts: 1s, 2s, 4s)
+- Handles all Google API error codes gracefully
+- Tracks operation status: pending → processing → completed/failed
+
+**Database (`db.py`):**
+- Added `pending_deletes` table:
+  - `note_id` (PRIMARY KEY)
+  - `status` (pending/processing/completed/failed)
+  - `queued_at`, `completed_at` timestamps
+  - `attempts` counter
+  - `last_error` message
+- Index on `status` for fast queries
+
 **Backend (`main.py`):**
-- Added `delete_note_with_retry()` function with exponential backoff (3 retries, 1s → 2s → 4s delays)
-- Handles Google API errors gracefully:
-  - **429 (Rate Limit)**: Retries with backoff
-  - **403 with "quota"**: Stops batch and returns quota error
-  - **404 (Not Found)**: Treats as success (already deleted)
-  - **403 (Permission)**: Returns clear error message
-- Added 50ms delay between requests (max 20 req/sec) to avoid hitting rate limits
-- Returns detailed `DeleteResponse` with:
-  - `success_ids`: List of successfully deleted note IDs
-  - `errors`: Array of `{note_id, error}` objects for failures
-  - `quota_exceeded`: Boolean flag
-  - `warning`: User-facing message
-- If quota is hit mid-batch, stops processing and marks remaining notes as skipped
+- Simplified `/api/action/delete` endpoint:
+  - Immediately marks notes as trashed in UI
+  - Enqueues notes to background queue
+  - Returns immediately (non-blocking)
+  - Response includes queued count and note IDs
+- New `/api/queue/status` endpoint:
+  - Returns real-time queue statistics
+  - Shows pending, processing, completed, failed counts
+  - Lists recent failures
+  - Indicates worker thread health
 
 **Frontend (`static/app.js`, `templates/index.html`, `static/style.css`):**
-- Created modal dialog system for error/warning display
-- Updated `performDelete()` to handle new response format
-- Shows detailed error modal when:
-  - Quota limit is reached (with retry instructions)
-  - Individual notes fail to delete (with error details)
-  - Partial success occurs
-- Modal includes:
-  - Success count in green box
-  - Warning message in yellow box for quota issues
-  - Error list with note IDs and specific error messages
-  - User guidance on what to do next
-- Status indicator still shows overall success count
-- Non-blocking UI - errors don't stall the interface
+- **Immediate UI feedback**: Notes disappear instantly when deleted (optimistic update)
+- **Queue status indicator**: Shows "Processing N deletion(s)" in header
+- **Status polling**: Fetches queue status every 2 seconds
+- **Non-blocking UI**: User can continue searching, filtering, deleting while queue processes
+- **Error notifications**: Modal shows failures from background queue
+- **Informative modal**: For large batches (>5 notes), explains background processing
+- Pulsing animation on queue status indicator
 
-#### Impact & Limitations
-- **Large batches (100+ notes)** may hit rate limits — users are advised to delete in smaller batches
-- **No transactional guarantee** — if the 50th note fails, the first 49 are already gone
-- **Deletion is still synchronous** in the endpoint (blocks until complete) — could be improved with websocket/SSE streaming in future
-- **Unknown quota limits** — Google doesn't publish specific Keep API quotas, so we use conservative rate limiting
+#### Impact & Limitations (After Queue System)
+- ✅ **Scales to any batch size** — queue processes deletions at safe rate (72/min)
+- ✅ **Non-blocking UI** — user can continue working while deletions process
+- ✅ **Respects quotas** — rate limiting ensures we stay within GCP limits with 20% margin
+- ✅ **Resilient to failures** — retries, error tracking, and status reporting
+- ⚠️ **No transactional guarantee** — deletions are still individual API calls
+- ⚠️ **Background processing** — large batches may take several minutes
+- ⚠️ **Permanent deletion** — no undo once queue processes the note
+- ℹ️ **Database overhead** — tracking table adds minimal storage cost
+
+**Performance**:
+- Small batches (< 10 notes): ~10 seconds
+- Medium batches (50 notes): ~42 seconds
+- Large batches (500 notes): ~7 minutes
+- Very large batches (1000 notes): ~14 minutes
 
 #### Lesson
-> **Always check for batch endpoints before implementing mass operations.** When no batch API exists, implement:
-> 1. Exponential backoff and retry logic
-> 2. Rate limiting to avoid quota issues
-> 3. Detailed error reporting (don't silently fail)
-> 4. Graceful degradation (partial success handling)
-> 5. User-facing error modals with actionable guidance
+> **When APIs lack batch operations and have quota limits**:
+> 1. ✅ Implement background queue with rate limiting
+> 2. ✅ Decouple UI from backend processing (optimistic updates)
+> 3. ✅ Track operation status in database
+> 4. ✅ Provide real-time status updates to users
+> 5. ✅ Handle all error cases gracefully with retry logic
+> 6. ✅ Calculate safe request rates based on published quotas (with margin)
+> 7. ✅ Use thread-safe queue for concurrent operations
+> 8. ✅ Implement worker health monitoring
 >
-> **For quota-limited APIs without published limits, be conservative**: Add delays between requests and handle 429/403 quota errors explicitly.
+> **Key architectural principle**: For rate-limited APIs, always process operations asynchronously with proper queue management. Never block the user's experience waiting for slow API operations.
 
 ---
 

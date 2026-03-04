@@ -48,6 +48,23 @@ def init_db():
                 regex TEXT
             )
         ''')
+        # Pending delete operations queue
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS pending_deletes (
+                note_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'pending',
+                queued_at TEXT NOT NULL,
+                completed_at TEXT,
+                attempts INTEGER DEFAULT 0,
+                last_error TEXT,
+                FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE
+            )
+        ''')
+        # Index for faster status queries
+        conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_pending_deletes_status
+            ON pending_deletes(status)
+        ''')
     conn.close()
 
 if __name__ == "__main__":

@@ -19,13 +19,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalCloseBtn = document.getElementById('modal-close-btn');
     const modalOkBtn = document.getElementById('modal-ok-btn');
 
+    // Queue Status Elements
+    const queueStatusEl = document.getElementById('queue-status');
+    const queueTextEl = document.getElementById('queue-text');
+
     // State
     let notes = [];
     let selectedNoteIds = new Set();
     let activeNoteId = null;
+    let queuePollInterval = null;
 
     // Initialization
     loadNotes();
+    startQueueStatusPolling();
 
     // Event Listeners
     searchBtn.addEventListener('click', () => loadNotes());
@@ -69,10 +75,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function performDelete(noteIdsArray, nextActiveId = null) {
         if (noteIdsArray.length === 0) return;
 
-        const isMultiple = noteIdsArray.length > 1;
-
         massDeleteBtn.disabled = true;
-        statusEl.textContent = `Deleting ${noteIdsArray.length} note(s)...`;
+        statusEl.textContent = `Queuing ${noteIdsArray.length} note(s)...`;
         statusEl.className = 'status-indicator status-loading';
 
         try {
@@ -86,35 +90,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!resp.ok) {
                 // HTTP error
-                showModal('Error', `<p>Failed to delete notes: ${result.detail || 'Unknown error'}</p>`, 'error');
-                statusEl.textContent = 'Error deleting notes';
+                showModal('Error', `<p>Failed to queue deletion: ${result.detail || 'Unknown error'}</p>`, 'error');
+                statusEl.textContent = 'Error queueing delete';
                 statusEl.className = 'status-indicator';
+                massDeleteBtn.disabled = false;
                 return;
             }
 
-            // Success - update status
-            statusEl.textContent = `Deleted ${result.deleted} note(s)`;
+            // Success - notes are queued for background deletion
+            statusEl.textContent = `Queued ${result.queued} note(s)`;
             statusEl.className = 'status-indicator status-ok';
 
-            // Handle partial failures or warnings
-            if (result.warning || result.errors.length > 0) {
-                showDeleteResultModal(result);
-            }
-
             // Clear active preview if the active note was deleted
-            const deletedSet = new Set(result.success_ids);
-            if (deletedSet.has(activeNoteId)) {
+            const queuedSet = new Set(result.note_ids);
+            if (queuedSet.has(activeNoteId)) {
                 clearPreviewPane();
             }
 
-            // Clear selection for successfully deleted notes
-            result.success_ids.forEach(id => selectedNoteIds.delete(id));
+            // Clear selection for queued notes
+            result.note_ids.forEach(id => selectedNoteIds.delete(id));
             selectAllCheckbox.checked = false;
 
             // Keep track of next active component
             activeNoteId = nextActiveId;
 
-            await loadNotes(); // Reload the table
+            // Immediate UI update - reload notes (queued notes are already marked trashed)
+            await loadNotes();
 
             // If we have a next note to cycle to, open it
             if (activeNoteId) {
@@ -122,10 +123,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (next) showPreview(next);
             }
 
+            // Show info that processing is happening in background
+            if (result.queued > 5) {
+                showModal(
+                    'Deletion Queued',
+                    `<p>Your ${result.queued} note(s) have been queued for deletion.</p>
+                     <div class="success-box">Notes will be processed in the background at a rate of ~72 deletions per minute to respect API quotas.</div>
+                     <p style="margin-top: 1rem; color: var(--text-secondary);">
+                     You can continue using the app while deletions process. Check the queue status indicator in the header for progress.
+                     </p>`,
+                    'success'
+                );
+            }
+
         } catch (err) {
             console.error(err);
-            showModal('Error', `<p>Network error while deleting notes: ${err.message}</p>`, 'error');
-            statusEl.textContent = 'Error deleting notes';
+            showModal('Error', `<p>Network error while queueing deletion: ${err.message}</p>`, 'error');
+            statusEl.textContent = 'Error queueing delete';
             statusEl.className = 'status-indicator';
         } finally {
             massDeleteBtn.disabled = false;
@@ -300,6 +314,65 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             actionBar.style.display = 'none';
             statusEl.style.display = 'block'; // Show status when action bar is hidden
+        }
+    }
+
+    // Queue Status Polling
+    function startQueueStatusPolling() {
+        // Poll every 2 seconds
+        queuePollInterval = setInterval(updateQueueStatus, 2000);
+        // Also update immediately
+        updateQueueStatus();
+    }
+
+    async function updateQueueStatus() {
+        try {
+            const resp = await fetch('/api/queue/status');
+            if (!resp.ok) return;
+
+            const status = await resp.json();
+
+            const queueSize = status.queue_size || 0;
+            const processing = status.currently_processing || 0;
+            const pending = status.status_counts?.pending || 0;
+
+            const totalActive = queueSize + processing + pending;
+
+            if (totalActive > 0) {
+                // Show queue status
+                queueStatusEl.style.display = 'flex';
+                queueTextEl.textContent = `Processing ${totalActive} deletion(s)`;
+            } else {
+                // Hide queue status
+                queueStatusEl.style.display = 'none';
+            }
+
+            // Check for recent failures and show modal
+            if (status.recent_failures && status.recent_failures.length > 0) {
+                // Only show if we haven't shown this failure before
+                const lastFailure = status.recent_failures[0];
+                const lastFailureKey = `failure_${lastFailure.note_id}`;
+
+                if (!sessionStorage.getItem(lastFailureKey)) {
+                    sessionStorage.setItem(lastFailureKey, 'shown');
+
+                    let failureHTML = '<p><strong>Some deletions failed:</strong></p><div class="error-list">';
+                    status.recent_failures.slice(0, 5).forEach(failure => {
+                        failureHTML += `
+                            <div class="error-item">
+                                <div class="error-item-id">${escapeHTML(failure.note_id)}</div>
+                                <div class="error-item-msg">${escapeHTML(failure.last_error || 'Unknown error')}</div>
+                            </div>
+                        `;
+                    });
+                    failureHTML += '</div>';
+
+                    showModal('Deletion Errors', failureHTML, 'error');
+                }
+            }
+
+        } catch (err) {
+            console.error('Failed to fetch queue status:', err);
         }
     }
 

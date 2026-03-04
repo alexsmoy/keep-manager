@@ -305,6 +305,31 @@ input[type="checkbox"] {
     color: #4ade80;
 }
 
+/* Queue Status Indicator */
+.queue-status {
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.813rem;
+    font-weight: 600;
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid #fbbf24;
+    color: #fbbf24;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 0.5rem;
+}
+
+.queue-icon {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 /* Modal Overlay and Dialog */
 .modal-overlay {
     position: fixed;

@@ -189,18 +189,22 @@ def check_env_file():
     return True
 
 def check_database():
-    """Check if database exists, initialize if needed"""
+    """Check if database exists, initialize/verify schema if needed"""
     print_info("Checking database...")
 
-    if Path('keep_cache.db').exists():
-        print_success("Database exists")
-        return True
+    db_exists = Path('keep_cache.db').exists()
+    if db_exists:
+        print_success("Database file found")
+    else:
+        print_warning("Database not found, creating...")
 
-    print_warning("Database not found, initializing...")
     try:
         from db import init_db
         init_db()
-        print_success("Database initialized successfully")
+        if db_exists:
+            print_success("Database schema verified/updated")
+        else:
+            print_success("Database initialized successfully")
         return True
     except Exception as e:
         print_error(f"Failed to initialize database: {e}")
