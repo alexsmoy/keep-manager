@@ -13,37 +13,24 @@
 <body>
     <div class="container">
 
-        <!-- Sticky Header Area -->
-        <div class="header-area">
-            <div class="header">
-                <h1>Keep Manager</h1>
-                <div id="status" class="status-indicator status-loading">Initializing...</div>
+        <!-- Compact Single-Strip Header -->
+        <div class="header-strip">
+            <h1>Keep Manager</h1>
+
+            <input type="text" id="search-input" placeholder="Search title or body...">
+
+            <input type="text" id="regex-input" placeholder="Regex filter (e.g. \byoutube\.com\b)">
+
+            <button id="search-btn">Filter</button>
+
+            <!-- Action Bar (shows when notes are selected) -->
+            <div id="action-bar" class="action-bar-inline" style="display: none;">
+                <span class="selected-text"><strong id="selected-count">0</strong> selected</span>
+                <button id="mass-delete-btn" class="danger btn-small">Delete</button>
+                <button id="clear-selection-btn" class="btn-small btn-outline">Clear</button>
             </div>
 
-            <div class="controls-panel">
-                <div class="input-group">
-                    <label for="search-input">Standard Search</label>
-                    <input type="text" id="search-input" placeholder="Search title or body...">
-                </div>
-                <div class="input-group">
-                    <label for="regex-input">Regex Filter</label>
-                    <input type="text" id="regex-input" placeholder="e.g. \byoutube\.com\b">
-                </div>
-                <div class="input-group" style="justify-content: flex-end; flex: 0.5;">
-                    <button id="search-btn" style="height: 100%;">Filter</button>
-                </div>
-            </div>
-
-            <div id="action-bar" class="action-bar" style="display: none;">
-                <div>
-                    <strong id="selected-count">0</strong> notes selected
-                </div>
-                <div>
-                    <button id="mass-delete-btn" class="danger">Mass Delete</button>
-                    <button id="clear-selection-btn"
-                        style="background: transparent; border: 1px solid var(--border-color); margin-left:10px;">Clear</button>
-                </div>
-            </div>
+            <div id="status" class="status-indicator status-loading">Initializing...</div>
         </div>
 
         <!-- Main Split Content -->

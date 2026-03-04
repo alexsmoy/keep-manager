@@ -265,8 +265,10 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedCountText.textContent = count;
         if (count > 0) {
             actionBar.style.display = 'flex';
+            statusEl.style.display = 'none'; // Hide status when action bar is visible
         } else {
             actionBar.style.display = 'none';
+            statusEl.style.display = 'block'; // Show status when action bar is hidden
         }
     }
 

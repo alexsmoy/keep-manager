@@ -14,30 +14,27 @@ The frontend is a **single-page application** built with vanilla HTML, CSS, and 
 
 ## UI Layout Wireframe
 
+**Updated Design**: Single-strip compact header that fits entirely within viewport.
+
 ```mermaid
 block-beta
     columns 1
-    block:header["Header Area (Sticky)"]
-        columns 2
-        h1["Keep Manager (h1)"]
-        status["Status Indicator"]
-    end
-    block:controls["Controls Panel"]
-        columns 3
+    block:header["Header Strip (Single Row, Compact)"]
+        columns 8
+        h1["Keep Manager"]
         search["Search Input"]
         regex["Regex Input"]
-        filterBtn["Filter Button"]
+        filterBtn["Filter"]
+        space1[" "]
+        actionBar["Action Bar\n(when selected)"]
+        space2[" "]
+        status["Status"]
     end
-    block:actionBar["Action Bar (Hidden until selection)"]
-        columns 2
-        count["N notes selected"]
-        actions["Mass Delete | Clear"]
-    end
-    block:main["Main Content (Flex)"]
+    block:main["Main Content Area (Fills Remaining Viewport)"]
         columns 2
         block:table["Table Area (flex: 2)"]
             columns 3
-            cb["☐"] 
+            cb["☐"]
             title["Title"]
             preview["Preview"]
         end
@@ -46,6 +43,13 @@ block-beta
         end
     end
 ```
+
+**Layout Features**:
+- **Viewport-constrained**: Entire UI fits within screen height (100vh)
+- **Single-strip header**: All controls in one horizontal row
+- **Dynamic action bar**: Replaces status indicator when notes are selected
+- **Flex main content**: Table + preview pane fill remaining space
+- **No vertical scroll** on container (only within table/preview areas)
 
 ## Design System
 
@@ -88,7 +92,7 @@ let activeNoteId = null;           // Currently previewed note
 | `performDelete(idSet, next)`  | Deletes notes via API, cycles to next note     |
 | `toggleNoteSelection(id, on)` | Toggles checkbox selection state               |
 | `updateTableSelectionVisuals()` | Syncs checkbox/row highlight state           |
-| `updateActionBar()`           | Shows/hides action bar based on selection count|
+| `updateActionBar()`           | Shows/hides action bar based on selection count, toggles status visibility|
 | `escapeHTML(str)`             | XSS protection for rendered content            |
 
 ### Event Flow

@@ -22,66 +22,41 @@ body {
 }
 
 .container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 1rem;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
     height: 100vh;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
-/* Sticky Header Area */
-.header-area {
-    position: sticky;
-    top: 0;
-    background-color: var(--bg-color);
-    z-index: 100;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.header {
+/* Compact Single-Strip Header */
+.header-strip {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 1rem 0;
+    gap: 0.75rem;
+    background-color: var(--card-bg);
+    padding: 0.75rem 1.5rem;
+    border-bottom: 2px solid var(--border-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
 }
 
 h1 {
-    font-size: 1.8rem;
+    font-size: 1.4rem;
     font-weight: 700;
     margin: 0;
     background: linear-gradient(135deg, #a78bfa 0%, #60a5fa 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    white-space: nowrap;
+    margin-right: 1rem;
 }
 
-/* Controls / Search Bar */
-.controls-panel {
-    display: flex;
-    gap: 1rem;
-    background: var(--card-bg);
-    padding: 1rem;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    margin-bottom: 1rem;
-}
-
-.input-group {
+#search-input {
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.input-group label {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    font-weight: 600;
-}
-
-input[type="text"] {
-    width: 100%;
+    min-width: 200px;
     padding: 0.5rem 0.75rem;
     background: var(--bg-color);
     border: 1px solid var(--border-color);
@@ -89,7 +64,18 @@ input[type="text"] {
     color: var(--text-primary);
     font-size: 0.875rem;
     transition: border-color 0.2s;
-    box-sizing: border-box;
+}
+
+#regex-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    transition: border-color 0.2s;
 }
 
 input[type="text"]:focus {
@@ -106,6 +92,7 @@ button {
     font-weight: 600;
     cursor: pointer;
     transition: background-color 0.2s;
+    white-space: nowrap;
 }
 
 button:hover {
@@ -125,25 +112,49 @@ button:disabled {
     cursor: not-allowed;
 }
 
-.action-bar {
+.btn-small {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.813rem;
+}
+
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-outline:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--accent);
+}
+
+/* Inline Action Bar (appears in header when notes selected) */
+.action-bar-inline {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 0.75rem 1rem;
-    background: rgba(139, 92, 246, 0.1);
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    background: rgba(139, 92, 246, 0.15);
     border: 1px solid var(--accent);
-    border-radius: 8px;
-    margin-bottom: 1rem;
+    border-radius: 4px;
+    margin-left: auto;
+    margin-right: 1rem;
+}
+
+.selected-text {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    white-space: nowrap;
 }
 
 /* Main Split Layout */
 .main-content {
     display: flex;
     flex: 1;
-    gap: 1.5rem;
+    gap: 1rem;
     overflow: hidden;
-    /* Prevent body scroll, allow internal scroll */
-    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-color);
 }
 
 /* Table Area */
@@ -277,11 +288,13 @@ input[type="checkbox"] {
 }
 
 .status-indicator {
-    padding: 0.25rem 0.5rem;
+    padding: 0.35rem 0.75rem;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.813rem;
     font-weight: 600;
-    background: var(--border-color);
+    background: rgba(51, 65, 85, 0.5);
+    white-space: nowrap;
+    margin-left: auto;
 }
 
 .status-loading {
