@@ -124,6 +124,112 @@ The Google Keep API does NOT have a PATCH or PUT method for notes. Once a note i
 
 ---
 
+### ISSUE-006: No Batch Delete API - Individual Calls Required
+
+**Discovered**: 2026-03-03
+**Severity**: Medium
+**Status**: Fixed (with workarounds)
+**Files Affected**: `main.py`, `static/app.js`
+
+#### Problem
+There is **no batch delete endpoint** in the Google Keep API. The API only provides individual `notes.delete()` calls. When users select many notes for mass deletion, the backend must make individual API requests in a loop, which:
+- Takes longer (network latency per request)
+- Can hit rate limits/quotas with large batches
+- Has no transactional guarantee (partial failures are possible)
+- Blocks the HTTP response until all deletes complete
+
+#### Root Cause
+Initially assumed there would be a batch operation similar to `permissions.batchCreate/batchDelete`. After reviewing the official API documentation, confirmed that only these batch operations exist:
+- `notes.permissions.batchCreate`
+- `notes.permissions.batchDelete`
+
+There is no `notes.batchDelete` method.
+
+#### Fix Applied
+**Backend (`main.py`):**
+- Added `delete_note_with_retry()` function with exponential backoff (3 retries, 1s → 2s → 4s delays)
+- Handles Google API errors gracefully:
+  - **429 (Rate Limit)**: Retries with backoff
+  - **403 with "quota"**: Stops batch and returns quota error
+  - **404 (Not Found)**: Treats as success (already deleted)
+  - **403 (Permission)**: Returns clear error message
+- Added 50ms delay between requests (max 20 req/sec) to avoid hitting rate limits
+- Returns detailed `DeleteResponse` with:
+  - `success_ids`: List of successfully deleted note IDs
+  - `errors`: Array of `{note_id, error}` objects for failures
+  - `quota_exceeded`: Boolean flag
+  - `warning`: User-facing message
+- If quota is hit mid-batch, stops processing and marks remaining notes as skipped
+
+**Frontend (`static/app.js`, `templates/index.html`, `static/style.css`):**
+- Created modal dialog system for error/warning display
+- Updated `performDelete()` to handle new response format
+- Shows detailed error modal when:
+  - Quota limit is reached (with retry instructions)
+  - Individual notes fail to delete (with error details)
+  - Partial success occurs
+- Modal includes:
+  - Success count in green box
+  - Warning message in yellow box for quota issues
+  - Error list with note IDs and specific error messages
+  - User guidance on what to do next
+- Status indicator still shows overall success count
+- Non-blocking UI - errors don't stall the interface
+
+#### Impact & Limitations
+- **Large batches (100+ notes)** may hit rate limits — users are advised to delete in smaller batches
+- **No transactional guarantee** — if the 50th note fails, the first 49 are already gone
+- **Deletion is still synchronous** in the endpoint (blocks until complete) — could be improved with websocket/SSE streaming in future
+- **Unknown quota limits** — Google doesn't publish specific Keep API quotas, so we use conservative rate limiting
+
+#### Lesson
+> **Always check for batch endpoints before implementing mass operations.** When no batch API exists, implement:
+> 1. Exponential backoff and retry logic
+> 2. Rate limiting to avoid quota issues
+> 3. Detailed error reporting (don't silently fail)
+> 4. Graceful degradation (partial success handling)
+> 5. User-facing error modals with actionable guidance
+>
+> **For quota-limited APIs without published limits, be conservative**: Add delays between requests and handle 429/403 quota errors explicitly.
+
+---
+
+### ISSUE-007: Google Keep API Quotas Not Publicly Documented
+
+**Discovered**: 2026-03-03
+**Severity**: Low
+**Status**: Documented (mitigation in place)
+**Files Affected**: `main.py`
+
+#### Problem
+Google does not publish specific rate limits or quota information for the Google Keep API. This makes it difficult to:
+- Know how many requests per second/minute/day are allowed
+- Predict when quota errors will occur
+- Optimize batch sizes for mass operations
+
+#### Impact
+Without knowing exact limits, we must be conservative:
+- Added arbitrary 50ms delay between delete requests (20 req/sec max)
+- Cannot provide accurate estimates to users for large deletion batches
+- Users may encounter quota errors unpredictably
+
+#### Resolution
+- Implemented retry logic with exponential backoff for all API calls
+- Handle 429 and 403 quota errors explicitly
+- Show clear user-facing messages when quota is hit
+- Recommend users delete in smaller batches (50-100 notes at a time)
+- Monitor server logs for quota patterns to adjust delays if needed
+
+#### Lesson
+> **When working with APIs that don't publish quotas**:
+> 1. Implement conservative rate limiting from the start
+> 2. Add comprehensive error handling for quota errors (429, 403)
+> 3. Provide user guidance on recommended batch sizes
+> 4. Log quota errors to identify patterns over time
+> 5. Consider adding configurable rate limits for power users
+
+---
+
 ## Issue Template
 
 When adding new issues, use this format:

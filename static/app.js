@@ -12,6 +12,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusEl = document.getElementById('status');
     const previewArea = document.getElementById('preview-area');
 
+    // Modal Elements
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const modalCloseBtn = document.getElementById('modal-close-btn');
+    const modalOkBtn = document.getElementById('modal-ok-btn');
+
     // State
     let notes = [];
     let selectedNoteIds = new Set();
@@ -24,6 +31,13 @@ document.addEventListener('DOMContentLoaded', () => {
     searchBtn.addEventListener('click', () => loadNotes());
     searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') loadNotes(); });
     regexInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') loadNotes(); });
+
+    // Modal Event Listeners
+    modalCloseBtn.addEventListener('click', closeModal);
+    modalOkBtn.addEventListener('click', closeModal);
+    modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) closeModal();
+    });
 
     selectAllCheckbox.addEventListener('change', (e) => {
         const isChecked = e.target.checked;
@@ -46,55 +60,72 @@ document.addEventListener('DOMContentLoaded', () => {
     massDeleteBtn.addEventListener('click', async () => {
         if (selectedNoteIds.size === 0) return;
 
-        const confirmed = confirm(`⚠️ PERMANENT DELETE: Are you sure you want to permanently delete ${selectedNoteIds.size} notes? This action cannot be undone — notes will be permanently removed from Google Keep.`);
+        const confirmed = confirm(`⚠️ PERMANENT DELETE: Are you sure you want to permanently delete ${selectedNoteIds.size} note(s)? This action cannot be undone — notes will be permanently removed from Google Keep.`);
         if (!confirmed) return;
 
-        await performDelete(selectedNoteIds, null);
+        await performDelete(Array.from(selectedNoteIds), null);
     });
 
-    async function performDelete(idSet, nextActiveId = null) {
-        if (idSet.size === 0) return;
+    async function performDelete(noteIdsArray, nextActiveId = null) {
+        if (noteIdsArray.length === 0) return;
+
+        const isMultiple = noteIdsArray.length > 1;
 
         massDeleteBtn.disabled = true;
-        statusEl.textContent = `Deleting ${idSet.size} notes...`;
+        statusEl.textContent = `Deleting ${noteIdsArray.length} note(s)...`;
         statusEl.className = 'status-indicator status-loading';
 
         try {
             const resp = await fetch('/api/action/delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ note_ids: Array.from(idSet) })
+                body: JSON.stringify({ note_ids: noteIdsArray })
             });
 
-            if (resp.ok) {
-                const result = await resp.json();
-                statusEl.textContent = `Deleted ${result.deleted} notes.`;
-                statusEl.className = 'status-indicator status-ok';
+            const result = await resp.json();
 
-                // Clear active preview if the active note was deleted
-                if (idSet.has(activeNoteId)) {
-                    clearPreviewPane();
-                }
-
-                idSet.forEach(id => selectedNoteIds.delete(id));
-                selectAllCheckbox.checked = false;
-
-                // Keep track of next active component
-                activeNoteId = nextActiveId;
-
-                await loadNotes(); // Reload the table
-
-                // If we have a next note to cycle to, open it
-                if (activeNoteId) {
-                    const next = notes.find(n => n.id === activeNoteId);
-                    if (next) showPreview(next);
-                }
-            } else {
-                throw new Error("Failed to delete notes");
+            if (!resp.ok) {
+                // HTTP error
+                showModal('Error', `<p>Failed to delete notes: ${result.detail || 'Unknown error'}</p>`, 'error');
+                statusEl.textContent = 'Error deleting notes';
+                statusEl.className = 'status-indicator';
+                return;
             }
+
+            // Success - update status
+            statusEl.textContent = `Deleted ${result.deleted} note(s)`;
+            statusEl.className = 'status-indicator status-ok';
+
+            // Handle partial failures or warnings
+            if (result.warning || result.errors.length > 0) {
+                showDeleteResultModal(result);
+            }
+
+            // Clear active preview if the active note was deleted
+            const deletedSet = new Set(result.success_ids);
+            if (deletedSet.has(activeNoteId)) {
+                clearPreviewPane();
+            }
+
+            // Clear selection for successfully deleted notes
+            result.success_ids.forEach(id => selectedNoteIds.delete(id));
+            selectAllCheckbox.checked = false;
+
+            // Keep track of next active component
+            activeNoteId = nextActiveId;
+
+            await loadNotes(); // Reload the table
+
+            // If we have a next note to cycle to, open it
+            if (activeNoteId) {
+                const next = notes.find(n => n.id === activeNoteId);
+                if (next) showPreview(next);
+            }
+
         } catch (err) {
             console.error(err);
-            statusEl.textContent = "Error deleting notes.";
+            showModal('Error', `<p>Network error while deleting notes: ${err.message}</p>`, 'error');
+            statusEl.textContent = 'Error deleting notes';
             statusEl.className = 'status-indicator';
         } finally {
             massDeleteBtn.disabled = false;
@@ -225,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     nextNoteId = notes[idx - 1].id;
                 }
             }
-            performDelete(new Set([note.id]), nextNoteId);
+            performDelete([note.id], nextNoteId);
         });
     }
 
@@ -270,6 +301,85 @@ document.addEventListener('DOMContentLoaded', () => {
             actionBar.style.display = 'none';
             statusEl.style.display = 'block'; // Show status when action bar is hidden
         }
+    }
+
+    // Modal Functions
+    function showModal(title, bodyHTML, type = 'info') {
+        modalTitle.textContent = title;
+        modalBody.innerHTML = bodyHTML;
+        modalOverlay.style.display = 'flex';
+
+        // Add type-specific styling if needed
+        if (type === 'error') {
+            modalTitle.style.color = 'var(--danger)';
+        } else if (type === 'warning') {
+            modalTitle.style.color = '#fbbf24';
+        } else if (type === 'success') {
+            modalTitle.style.color = '#4ade80';
+        } else {
+            modalTitle.style.color = 'var(--text-primary)';
+        }
+    }
+
+    function closeModal() {
+        modalOverlay.style.display = 'none';
+    }
+
+    function showDeleteResultModal(result) {
+        let bodyHTML = '';
+
+        // Success summary
+        if (result.deleted > 0) {
+            bodyHTML += `<div class="success-box">✓ Successfully deleted ${result.deleted} note(s)</div>`;
+        }
+
+        // Warning message
+        if (result.warning) {
+            bodyHTML += `<div class="warning-box">⚠️ ${escapeHTML(result.warning)}</div>`;
+        }
+
+        // Quota exceeded specific message
+        if (result.quota_exceeded) {
+            bodyHTML += `
+                <p style="margin-top: 1rem; color: var(--text-secondary);">
+                    <strong>What happened?</strong><br>
+                    Google's API has rate limits to prevent excessive requests.
+                    Your deletion batch exceeded these limits.
+                </p>
+                <p style="color: var(--text-secondary);">
+                    <strong>What to do:</strong><br>
+                    • Wait 1-2 minutes before trying again<br>
+                    • Delete in smaller batches (e.g., 50 notes at a time)<br>
+                    • The successfully deleted notes are already gone
+                </p>
+            `;
+        }
+
+        // Error details
+        if (result.errors && result.errors.length > 0) {
+            bodyHTML += `
+                <p style="margin-top: 1rem;"><strong>Failed to delete ${result.failed} note(s):</strong></p>
+                <div class="error-list">
+            `;
+
+            result.errors.forEach(err => {
+                bodyHTML += `
+                    <div class="error-item">
+                        <div class="error-item-id">${escapeHTML(err.note_id)}</div>
+                        <div class="error-item-msg">${escapeHTML(err.error)}</div>
+                    </div>
+                `;
+            });
+
+            bodyHTML += `</div>`;
+        }
+
+        const modalType = result.quota_exceeded ? 'warning' : (result.failed > 0 ? 'error' : 'info');
+        const modalTitleText = result.quota_exceeded ? 'Quota Limit Reached' :
+                                result.failed > 0 ? 'Deletion Partially Failed' :
+                                'Deletion Complete';
+
+        showModal(modalTitleText, bodyHTML, modalType);
     }
 
     // Utils
