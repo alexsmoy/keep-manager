@@ -237,6 +237,17 @@ class QueueManager:
                     self.stats["queue_size"] = self.queue.qsize()
 
                 print(f"Processing note: {note_id}")
+                # Check if still in DB (was it dropped by sync timeout?)
+                conn = get_db()
+                exists = conn.execute("SELECT 1 FROM pending_deletes WHERE note_id = ? AND status IN (?, ?, ?)", 
+                                    (note_id, OperationStatus.PENDING, OperationStatus.PROCESSING, OperationStatus.FAILED)).fetchone()
+                conn.close()
+                if not exists:
+                    print(f"Skipping note {note_id}: Dropped from queue (timeout or manual override)")
+                    with self.stats_lock:
+                         self.stats["queue_size"] = self.queue.qsize()
+                    continue
+
                 # Update status to processing
                 self._update_db_status(note_id, OperationStatus.PROCESSING)
 

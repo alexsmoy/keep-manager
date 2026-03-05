@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 from keep_client import get_keep_service
 from db import get_db
 
@@ -16,9 +17,14 @@ def sync_notes(user_email=None):
     conn = get_db()
     
     try:
-        next_page_token = None
         total_synced = 0
         
+        # Pre-fetch pending deletions (not completed) to prevent UI conflicts
+        cursor = conn.execute("SELECT note_id, queued_at FROM pending_deletes WHERE status IN ('pending', 'processing', 'failed')")
+        pending_deletes = {row[0]: row[1] for row in cursor.fetchall()}
+        now = datetime.utcnow()
+        
+        next_page_token = None
         while True:
             # NOTE: When no filter is supplied, the API applies 'trashed = false' by default.
             # This means we only sync non-trashed notes. See ai-docs/known-issues.md (ISSUE-003).
@@ -59,6 +65,26 @@ def sync_notes(user_email=None):
                         body_content = "\n".join(items)
                 
                 snippet = body_content[:150] + "..." if len(body_content) > 150 else body_content
+
+                # UI Protection Logic:
+                # If the note is flagged for deletion locally, keep it hidden (trashed=1)
+                # unless it's been more than 24 hours, in which case we reset/revive it.
+                if note_id in pending_deletes:
+                    queued_at = datetime.fromisoformat(pending_deletes[note_id])
+                    # Ensure naive comparison
+                    if queued_at.tzinfo is not None:
+                        queued_at = queued_at.replace(tzinfo=None)
+                    
+                    if now - queued_at < timedelta(hours=24):
+                        # Flagged recently - hide from UI regardless of API response
+                        trashed_db = 1
+                    else:
+                        # Over 24 hours - reset transparency and drop from queue
+                        trashed_db = 0 
+                        with conn:
+                            conn.execute("DELETE FROM pending_deletes WHERE note_id = ?", (note_id,))
+                        print(f"Delete timeout (24h) for note {note_id}. Record restored and removed from queue.")
+
 
                 # Upsert note into database
                 with conn:
