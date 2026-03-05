@@ -162,9 +162,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const search = encodeURIComponent(searchInput.value.trim());
         const regex = encodeURIComponent(regexInput.value.trim());
         const includeSaved = showSavedToggle.checked;
+        const timestamp = new Date().getTime(); // Cache busting
 
         try {
-            const response = await fetch(`/api/notes?search=${search}&regex=${regex}&include_saved=${includeSaved}`);
+            const response = await fetch(`/api/notes?search=${search}&regex=${regex}&include_saved=${includeSaved}&_=${timestamp}`);
             if (!response.ok) {
                 const errData = await response.json();
                 throw new Error(errData.detail || "Failed to load notes");
@@ -284,20 +285,22 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const resp = await fetch(`/api/notes/${note.id}/save`, { method });
                 if (resp.ok) {
-                    note.saved = !note.saved;
-
-                    // Deselect and reset UI
+                    // Update server-side state succeeded, now refresh everything
                     selectedNoteIds.delete(note.id);
                     updateActionBar();
 
-                    await loadNotes(); // This will handle hiding if toggle is off
+                    await loadNotes();
 
-                    // If note is still visible, refresh preview
-                    if (notes.find(n => n.id === note.id)) {
-                        showPreview(note);
+                    // Check if IT'S STILL THERE after refresh (e.g. if showSaved is checked)
+                    const found = notes.find(n => n.id === note.id);
+                    if (found) {
+                        showPreview(found);
                     } else {
                         clearPreviewPane();
                     }
+                } else {
+                    const error = await resp.json();
+                    showModal('Error', `<p>Failed to update save status: ${error.detail || 'Unknown error'}</p>`, 'error');
                 }
             } catch (err) {
                 console.error(err);
